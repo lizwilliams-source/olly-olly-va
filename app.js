@@ -547,7 +547,7 @@ async function renderPriorityView(viewKey, title) {
           ${[25,50,100].map(n => `<button class="btn btn-sm per-page-btn ${priorityPageSize===n?'btn-primary':''}" data-size="${n}" onclick="setPriorityPageSize('${viewKey}','${title}',${n})">${n}</button>`).join('')}
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:auto auto 1fr 160px 160px auto auto;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
+      <div style="display:grid;grid-template-columns:16px 48px minmax(0,1fr) 180px 180px 160px 36px;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
         <div style="width:16px"></div>
         <div style="width:48px"></div>
         <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Company</div>
@@ -624,7 +624,7 @@ list.innerHTML = page.map(raw => {
     const colors = [{bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},{bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},{bg:'rgba(167,139,250,.2)',color:'#a78bfa'}];
     const ac = colors[parseInt(raw.id,10) % colors.length];
 
-    return `<div style="display:grid;grid-template-columns:auto auto 1fr 160px 160px auto auto;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : inQueue ? 'var(--purple)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'}" id="prow-${raw.id}">
+    return `<div style="display:grid;grid-template-columns:16px 48px minmax(0,1fr) 180px 180px 160px 36px;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : inQueue ? 'var(--purple)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'}" id="prow-${raw.id}">
       <input type="checkbox" class="queue-cb" data-id="${raw.id}" ${inQueue ? 'checked' : ''}
         onchange="handleQueueCheckbox('${viewKey}','${raw.id}',this.checked)"
         style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--purple)" />
