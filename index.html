@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Olly Olly Virtual Assistant</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>Olly Olly</h1>
+      <p>Virtual Assistant</p>
+    </div>
+
+    <span class="nav-section-label">Overview</span>
+    <div class="nav-item active" data-view="dashboard">
+      <span class="icon">⚡</span> Dashboard
+    </div>
+    <div class="nav-item" data-view="callqueue">
+      <span class="icon">📞</span> Call Queue
+      <span class="nav-badge" id="call-badge">0</span>
+    </div>
+    <div class="nav-item" data-view="followups">
+      <span class="icon">🔔</span> Follow-ups
+      <span class="nav-badge" id="followup-badge">0</span>
+    </div>
+
+    <span class="nav-section-label">Contacts</span>
+    <div class="nav-item" data-view="contacts">
+      <span class="icon">👥</span> All Contacts
+    </div>
+    <div class="nav-item" data-view="pipeline">
+      <span class="icon">📊</span> Pipeline
+    </div>
+
+    <span class="nav-section-label">Tools</span>
+    <div class="nav-item" data-view="ai">
+      <span class="icon">✨</span> AI Assistant
+    </div>
+    <div class="nav-item" data-view="coaching">
+      <span class="icon">🎯</span> Sales Coaching
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="hs-status">
+        <div class="hs-dot" id="hs-dot"></div>
+        <span id="hs-status-text">Connecting to HubSpot...</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main" id="main"></main>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title"></span>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
