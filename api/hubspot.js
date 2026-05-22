@@ -6,17 +6,16 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // Get fresh access token
-    const params = new URLSearchParams();
-    params.append('grant_type', 'refresh_token');
-    params.append('refresh_token', process.env.HUBSPOT_REFRESH_TOKEN);
-    params.append('client_id', process.env.HUBSPOT_CLIENT_ID);
-    params.append('client_secret', process.env.HUBSPOT_CLIENT_SECRET);
+    const hsParams = new URLSearchParams();
+    hsParams.append('grant_type', 'refresh_token');
+    hsParams.append('refresh_token', process.env.HUBSPOT_REFRESH_TOKEN);
+    hsParams.append('client_id', process.env.HUBSPOT_CLIENT_ID);
+    hsParams.append('client_secret', process.env.HUBSPOT_CLIENT_SECRET);
 
     const tokenRes = await fetch('https://api.hubapi.com/oauth/v1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
+      body: hsParams.toString(),
     });
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok) throw new Error(tokenData.message || 'Token refresh failed');
