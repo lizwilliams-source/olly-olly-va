@@ -395,7 +395,7 @@ async function renderDashboard() {
         <button class="btn btn-primary" onclick="showView('ai')">✨ Ask AI</button>
       </div>
     </div>
-    <div class="content">
+<div class="content">
       <div class="metrics-grid">
         <div class="metric-card blue"><div class="metric-label">My Companies</div><div class="metric-value">${state.contacts.length}</div><div class="metric-sub">Assigned to me</div></div>
         <div class="metric-card red"><div class="metric-label">Calls Needed</div><div class="metric-value">${callNeeded}</div><div class="metric-sub">Haven't called in 7+ days</div></div>
@@ -408,40 +408,26 @@ async function renderDashboard() {
         <div class="ai-insight-body"><span class="spinner"></span> Analyzing your companies...</div>
       </div>
 
-      <div>
-        <div class="section-header">
-          <span class="section-title">📵 Never Called By Me</span>
-          <span class="section-link" onclick="showView('callqueue')">See call queue →</span>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--red)" onclick="showView('nevercalled')">
+          <div class="metric-label">📵 Never Called</div>
+          <div class="metric-value" id="count-nevercalled" style="color:var(--red)">...</div>
+          <div class="metric-sub">Click to view →</div>
         </div>
-        <div id="panel-never-called" class="lead-list" style="margin-top:8px">
-          <div class="loading-state"><span class="spinner"></span> Loading...</div>
+        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--amber)" onclick="showView('roerisklist')">
+          <div class="metric-label">⚠️ ROE Risk</div>
+          <div class="metric-value" id="count-roe" style="color:var(--amber)">...</div>
+          <div class="metric-sub">14+ days no call →</div>
         </div>
-      </div>
-
-      <div>
-        <div class="section-header">
-          <span class="section-title">⚠️ ROE Risk (14+ days)</span>
+        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--blue)" onclick="showView('followuplist')">
+          <div class="metric-label">🔔 Follow-ups</div>
+          <div class="metric-value" id="count-followup" style="color:var(--blue)">...</div>
+          <div class="metric-sub">Active deals →</div>
         </div>
-        <div id="panel-roe" class="lead-list" style="margin-top:8px">
-          <div class="loading-state"><span class="spinner"></span> Loading...</div>
-        </div>
-      </div>
-
-      <div>
-        <div class="section-header">
-          <span class="section-title">🔔 Follow-ups</span>
-        </div>
-        <div id="panel-followup" class="lead-list" style="margin-top:8px">
-          <div class="loading-state"><span class="spinner"></span> Loading...</div>
-        </div>
-      </div>
-
-      <div>
-        <div class="section-header">
-          <span class="section-title">🚫 DNR</span>
-        </div>
-        <div id="panel-dnr" class="lead-list" style="margin-top:8px">
-          <div class="loading-state"><span class="spinner"></span> Loading...</div>
+        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--text3)" onclick="showView('dnrlist')">
+          <div class="metric-label">🚫 DNR</div>
+          <div class="metric-value" id="count-dnr" style="color:var(--text3)">...</div>
+          <div class="metric-sub">Do not reach out →</div>
         </div>
       </div>
     </div>`;
@@ -472,93 +458,53 @@ async function loadDashboardPanels() {
   const days14 = new Date(now - 14 * 86400000).toISOString();
   const days3 = new Date(now - 3 * 86400000).toISOString();
 
-  const props = ['name', 'phone', 'city', 'state', 'hubspot_owner_id', 'notes_last_contacted', 'hs_last_logged_call_date', 'subscription_status', 'dnr', 'recent_user_to_call', 'hubspot_owner_assigneddate', 'notes_next_activity_date'];
+  
 
-  async function fetchPanel(filterGroups, panelId, emptyMsg) {
+  async function fetchPanel(filterGroups, panelKey, countId, badgeId) {
     try {
       const data = await hsPost('/crm/v3/objects/companies/search', {
         filterGroups,
-        properties: props,
-        sorts: [{ propertyName: 'hs_last_logged_call_date', direction: 'ASCENDING' }],
-        limit: 20,
+        properties: ['name'],
+        limit: 100,
       });
-      const el = document.getElementById(panelId);
-      if (!el) return;
-      if (!data.results?.length) {
-        el.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
-        return;
-      }
-      
-      // Update sidebar badge counts
-      const badgeMap = { 'panel-never-called': 'badge-nevercalled', 'panel-roe': 'badge-roe', 'panel-followup': 'badge-followup', 'panel-dnr': 'badge-dnr' };
-      const badge = document.getElementById(badgeMap[panelId]);
-      if (badge) badge.textContent = data.results.length;
-      
-      el.innerHTML = data.results.map(raw => {
-        const p = raw.properties;
-        const name = p.name || 'Unknown';
-        const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
-        const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${raw.id}`;
-        const cleanPhone = p.phone ? p.phone.replace(/\D/g,'') : '';
-        const lastCall = p.hs_last_logged_call_date ? new Date(p.hs_last_logged_call_date).toLocaleDateString() : 'Never';
-        const colors = [
-          {bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},
-          {bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},
-          {bg:'rgba(245,166,35,.2)',color:'#f5a623'},
-          {bg:'rgba(240,82,82,.2)',color:'#f05252'},
-          {bg:'rgba(167,139,250,.2)',color:'#a78bfa'},
-        ];
-        const ac = colors[parseInt(raw.id,10) % colors.length];
-        return `<div class="lead-card" onclick="openContact('${raw.id}')">
-          <div class="avatar" style="background:${ac.bg};color:${ac.color}">${initials}</div>
-          <div>
-            <div class="lead-name" style="display:flex;align-items:center;gap:8px">
-              ${name}
-              <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
-            </div>
-            <div class="lead-meta">${p.city ? `${p.city}, ${p.state}` : 'No location'} · Last call: ${lastCall}${p.phone ? ` · <a href="tel:${cleanPhone}" onclick="event.stopPropagation()" style="color:var(--green);text-decoration:none">📞 ${p.phone}</a>` : ''}</div>
-          </div>
-          <div class="lead-right">
-            <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Write a call script for ${name}. Stage: ${p.subscription_status || 'unknown'}. Include opener, discovery questions, and objection handling.')">✨ Script</button>
-          </div>
-        </div>`;
-      }).join('');
+      const count = data.results?.length || 0;
+      const countEl = document.getElementById(countId);
+      if (countEl) countEl.textContent = count;
+      const badge = document.getElementById(badgeId);
+      if (badge) badge.textContent = count;
     } catch(e) {
-      const el = document.getElementById(panelId);
-      if (el) el.innerHTML = `<div class="empty-state">Failed to load</div>`;
+      const countEl = document.getElementById(countId);
+      if (countEl) countEl.textContent = '?';
     }
   }
 
-  // Panel 1 — Never Called By Me
   fetchPanel([{
     filters: [
       { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
       { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
     ]
-  }, {
+  },{
     filters: [
       { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-      { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY', },
+      { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY' },
     ]
-  }], 'panel-never-called', '🎉 No uncalled companies!');
+  }], 'never-called', 'count-nevercalled', 'badge-nevercalled');
 
-  // Panel 2 — ROE Risk
   fetchPanel([{
     filters: [
       { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
       { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
       { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days14 },
     ]
-  }, {
+  },{
     filters: [
       { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
       { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
       { propertyName: 'hubspot_owner_assigneddate', operator: 'LT', value: days3 },
       { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
     ]
-  }], 'panel-roe', '✅ No ROE risk companies!');
+  }], 'roe', 'count-roe', 'badge-roe');
 
-  // Panel 3 — Follow-ups
   fetchPanel([{
     filters: [
       { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
@@ -566,15 +512,14 @@ async function loadDashboardPanels() {
       { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days3 },
       { propertyName: 'notes_next_activity_date', operator: 'NOT_HAS_PROPERTY' },
     ]
-  }], 'panel-followup', '✅ No follow-ups needed!');
+  }], 'followup', 'count-followup', 'badge-followup');
 
-  // Panel 4 — DNR
   fetchPanel([{
     filters: [
       { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
       { propertyName: 'dnr', operator: 'EQ', value: 'Yes' },
     ]
-  }], 'panel-dnr', 'No DNR companies');
+  }], 'dnr', 'count-dnr', 'badge-dnr');
 }
 
 // ── CALL QUEUE ────────────────────────────────────────────────────────────────
@@ -1289,6 +1234,7 @@ async function renderPriorityView(viewKey, title, panelKey) {
     });
 
     const results = data.results || [];
+    priorityResults[viewKey] = results;
     const countEl = document.getElementById('priority-count');
     if (countEl) countEl.textContent = `${results.length} companies`;
 
@@ -1332,37 +1278,42 @@ function renderPriorityList(viewKey, results) {
     ];
     const ac = colors[parseInt(raw.id,10) % colors.length];
 
-    return `<div class="lead-card ${isSkipped ? 'skipped' : ''}" id="priority-row-${raw.id}" style="opacity:${isSkipped ? '0.45' : '1'};border-left:3px solid ${isSkipped ? 'var(--text3)' : 'var(--blue)'}">
-      <div style="display:flex;align-items:center;gap:10px;flex:1">
-        <input type="checkbox" ${isSkipped ? '' : 'checked'} onchange="toggleSkip('${viewKey}','${raw.id}',this.checked,'${name.replace(/'/g,"\\'")}',${JSON.stringify(results).replace(/'/g,"\\'")})" style="width:16px;height:16px;cursor:pointer;flex-shrink:0" title="${isSkipped ? 'Skipped' : 'Active'}" />
-        <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0">${initials}</div>
-        <div style="flex:1;min-width:0">
-          <div class="lead-name" style="display:flex;align-items:center;gap:8px">
-            ${isSkipped ? '🚫 ' : ''}${name}
-            <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
-          </div>
-          <div class="lead-meta" style="margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span>${p.city ? `${p.city}, ${p.state}` : 'No location'}</span>
-            <span>·</span>
-            <span>Last call: ${lastCall}</span>
-            ${p.subscription_status ? `<span>·</span><span style="color:var(--amber)">${p.subscription_status}</span>` : ''}
-          </div>
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'};transition:opacity .15s">
+      <input type="checkbox" ${isSkipped ? '' : 'checked'} 
+        onchange="toggleSkip('${viewKey}','${raw.id}',this.checked)" 
+        style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--blue)" />
+      <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
+          ${isSkipped ? '🚫 ' : ''}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</span>
+          <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;flex-shrink:0">HS ↗</a>
         </div>
-        <div style="flex-shrink:0;font-size:15px;font-weight:700;color:${isSkipped ? 'var(--text3)' : 'var(--green)'}">
-          ${isSkipped ? '—' : (p.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px">📞 ${p.phone}</a>` : '<span style="color:var(--text3);font-size:12px">No phone</span>')}
+        <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:nowrap">
+          <span>${p.city ? `${p.city}, ${p.state}` : 'No location'}</span>
+          <span>·</span>
+          <span>Last call: ${lastCall}</span>
+          ${p.subscription_status ? `<span>·</span><span style="color:var(--amber)">${p.subscription_status}</span>` : ''}
         </div>
+      </div>
+      <div style="flex-shrink:0;min-width:140px;text-align:right">
+        ${isSkipped 
+          ? '<span style="color:var(--text3);font-size:12px">Skipped</span>'
+          : p.phone 
+            ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${p.phone}</a>`
+            : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
       </div>
     </div>`;
   }).join('');
 }
+const priorityResults = {};
 
-function toggleSkip(viewKey, companyId, isChecked, name, results) {
+function toggleSkip(viewKey, companyId, isChecked) {
   if (isChecked) {
     skipState[viewKey].delete(companyId);
   } else {
     skipState[viewKey].add(companyId);
   }
-  renderPriorityList(viewKey, results);
+  renderPriorityList(viewKey, priorityResults[viewKey] || []);
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
