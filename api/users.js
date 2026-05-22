@@ -205,5 +205,27 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+// ── SET OWNER ID (self-service) ────────────────────────────────────────────
+  if (action === 'setowner') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+
+    const { ownerId } = req.body;
+    if (!ownerId) return res.status(400).json({ error: 'Owner ID required' });
+
+    const user = await kvGet(`user:${session.email}`);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.ownerId = ownerId;
+    await kvSet(`user:${session.email}`, user);
+
+    // Update session too
+    session.ownerId = ownerId;
+    await kvSet(`session:${token}`, session);
+
+    return res.status(200).json({ ok: true });
+  }
+
 return res.status(400).json({ error: 'Unknown action' });
 }
