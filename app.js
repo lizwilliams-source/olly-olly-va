@@ -21,7 +21,7 @@ async function initClerk() {
     console.error('No Clerk publishable key found');
     return;
   }
-  clerk = new Clerk(publishableKey);
+  clerk = new window.Clerk(publishableKey);
   await clerk.load();
   if (clerk.user) {
     await onSignedIn();
