@@ -90,8 +90,9 @@ async function saveOwnerFromUrl() {
   // Parse contact or company ID from URL
   const contactMatch = url.match(/\/contact\/(\d+)/);
   const companyMatch = url.match(/\/company\/(\d+)/);
-  const recordId = contactMatch?.[1] || companyMatch?.[1];
-  const isCompany = !!companyMatch;
+  const recordMatch = url.match(/\/record\/0-[12]\/(\d+)/);
+  const isCompany = !!companyMatch || url.includes('/record/0-2/');
+  const recordId = contactMatch?.[1] || companyMatch?.[1] || recordMatch?.[1];
 
   if (!recordId) {
     errorEl.textContent = 'Could not find a contact or company ID in that URL. Try copying the full URL from your browser.';
