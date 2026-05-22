@@ -643,18 +643,39 @@ async function renderAdmin() {
       <div class="topbar-left"><h2>⚙️ Admin</h2><p>Manage team members</p></div>
     </div>
     <div class="content">
-      <div>
-        <div class="section-title" style="margin-bottom:12px">Add new user</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <div><div class="field-label" style="margin-bottom:4px">Name</div><input id="new-name" placeholder="Jane Smith" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
-          <div><div class="field-label" style="margin-bottom:4px">Email</div><input id="new-email" placeholder="jane@ollyolly.com" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+        <!-- SINGLE ADD -->
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem">
+          <div class="section-title" style="margin-bottom:12px">Add one person</div>
+          <div style="margin-bottom:8px">
+            <div class="field-label" style="margin-bottom:4px">Full name</div>
+            <input id="new-name" placeholder="Jane Smith" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" oninput="autoFillUser()" />
+          </div>
+          <div style="margin-bottom:8px">
+            <div class="field-label" style="margin-bottom:4px">Email</div>
+            <input id="new-email" placeholder="Auto-filled from name" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
+          </div>
+          <div style="margin-bottom:12px">
+            <div class="field-label" style="margin-bottom:4px">Password</div>
+            <input id="new-password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" value="OllyOlly2025!" />
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" id="new-admin" /> Make admin</label>
+          </div>
+          <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="addUser()">Add user</button>
+          <div id="add-msg" style="font-size:12px;margin-top:8px"></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-          <div><div class="field-label" style="margin-bottom:4px">Password</div><input id="new-password" type="password" placeholder="Temp password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
-          <div style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" id="new-admin" /> Make admin</label></div>
+
+        <!-- BULK ADD -->
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem">
+          <div class="section-title" style="margin-bottom:4px">Bulk add</div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:10px">One full name per line. Email and password auto-generated.</div>
+          <textarea id="bulk-names" placeholder="Jane Smith&#10;John Doe&#10;Sarah Connor" style="width:100%;height:140px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;resize:none;font-family:inherit"></textarea>
+          <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="bulkAddUsers()">Add all</button>
+          <div id="bulk-msg" style="font-size:12px;margin-top:8px;line-height:1.6"></div>
         </div>
-        <button class="btn btn-primary" onclick="addUser()">Add user</button>
-        <span id="add-msg" style="font-size:12px;margin-left:12px"></span>
       </div>
 
       <div style="border-top:1px solid var(--border);padding-top:16px">
@@ -663,6 +684,51 @@ async function renderAdmin() {
       </div>
     </div>`;
 
+  loadUserList();
+}
+
+function autoFillUser() {
+  const name = document.getElementById('new-name').value.trim();
+  const parts = name.split(' ');
+  if (parts.length >= 2) {
+    const email = `${parts[0].toLowerCase()}.${parts[parts.length-1].toLowerCase()}@ollyolly.com`;
+    document.getElementById('new-email').value = email;
+  }
+}
+
+async function bulkAddUsers() {
+  const names = document.getElementById('bulk-names').value.trim().split('\n').map(n => n.trim()).filter(Boolean);
+  const msg = document.getElementById('bulk-msg');
+  if (!names.length) { msg.style.color = 'var(--red)'; msg.textContent = 'No names entered'; return; }
+
+  msg.style.color = 'var(--text2)';
+  msg.textContent = `Adding ${names.length} users...`;
+
+  const results = [];
+  for (const name of names) {
+    const parts = name.split(' ');
+    if (parts.length < 2) { results.push(`⚠ ${name} — needs first and last name`); continue; }
+    const email = `${parts[0].toLowerCase()}.${parts[parts.length-1].toLowerCase()}@ollyolly.com`;
+    const password = 'OllyOlly2025!';
+    try {
+      const res = await fetch('/api/users?action=add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify({ name, email, password, isAdmin: false }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        results.push(`✓ ${name} — ${email}${data.ownerId ? '' : ' (no HubSpot match)'}`);
+      } else {
+        results.push(`✗ ${name} — ${data.error}`);
+      }
+    } catch {
+      results.push(`✗ ${name} — failed`);
+    }
+  }
+
+  msg.innerHTML = results.map(r => `<div style="color:${r.startsWith('✓') ? 'var(--green)' : r.startsWith('⚠') ? 'var(--amber)' : 'var(--red)'}">${r}</div>`).join('');
+  document.getElementById('bulk-names').value = '';
   loadUserList();
 }
 
