@@ -1344,13 +1344,6 @@ function renderPriorityList(viewKey, results) {
           ${isSkipped ? '🚫 ' : ''}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</span>
           <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;flex-shrink:0">HS ↗</a>
         </div>
-        <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:nowrap">
-          <span>${p.city ? `${p.city}, ${p.state}` : 'No location'}</span>
-          <span>·</span>
-          <span>Last call: ${lastCall}</span>
-          ${p.subscription_status ? `<span>·</span><span style="color:var(--amber)">${p.subscription_status}</span>` : ''}
-        </div>
-      </div>
       <div style="flex-shrink:0;min-width:140px;text-align:right">
         ${isSkipped 
           ? '<span style="color:var(--text3);font-size:12px">Skipped</span>'
