@@ -16,18 +16,13 @@ const state = {
 let clerk;
 
 async function initClerk() {
-  clerk = new Clerk(document.querySelector('script[src*="clerk"]') ? getClerkKey() : '');
-
-  // Get publishable key from meta or env
   const publishableKey = window.__CLERK_PUBLISHABLE_KEY__;
   if (!publishableKey) {
     console.error('No Clerk publishable key found');
     return;
   }
-
   clerk = new Clerk(publishableKey);
   await clerk.load();
-
   if (clerk.user) {
     await onSignedIn();
   } else {
