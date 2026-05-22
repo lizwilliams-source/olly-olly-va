@@ -183,5 +183,20 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  // ── ADMIN: EDIT USER ───────────────────────────────────────────────────────
+  if (action === 'edit') {
+    const adminToken = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${adminToken}`);
+    if (!session?.isAdmin) return res.status(403).json({ error: 'Admin only' });
+
+    const { email, name, password } = req.body;
+    const user = await kvGet(`user:${email.toLowerCase()}`);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (name) user.name = name;
+    if (password) user.passwordHash = hashPassword(password);
+    await kvSet(`user:${email.toLowerCase()}`, user);
+    return res.status(200).json({ ok: true });
+  }
+
   return res.status(400).json({ error: 'Unknown action' });
 }
