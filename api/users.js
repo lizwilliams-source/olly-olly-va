@@ -169,5 +169,16 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  // ── MAKE ADMIN (one-time use) ──────────────────────────────────────────────
+  if (action === 'makeadmin') {
+    const { email, secret } = req.body;
+    if (secret !== 'ollyolly_admin_2025') return res.status(403).json({ error: 'Wrong secret' });
+    const user = await kvGet(`user:${email.toLowerCase()}`);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.isAdmin = true;
+    await kvSet(`user:${email.toLowerCase()}`, user);
+    return res.status(200).json({ ok: true });
+  }
+
   return res.status(400).json({ error: 'Unknown action' });
 }
