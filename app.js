@@ -359,7 +359,7 @@ function showView(view) {
   document.querySelectorAll('.nav-item').forEach(n => {
     n.classList.toggle('active', n.dataset.view === view);
   });
-  const views = {
+const views = {
     dashboard: renderDashboard,
     callqueue: renderCallQueue,
     followups: renderFollowups,
@@ -368,6 +368,10 @@ function showView(view) {
     ai: renderAI,
     coaching: renderCoaching,
     admin: renderAdmin,
+    nevercalled: () => renderPriorityView('nevercalled', '📵 Never Called By Me', 'panel-never-called-full'),
+    roerisklist: () => renderPriorityView('roerisklist', '⚠️ ROE Risk', 'panel-roe-full'),
+    followuplist: () => renderPriorityView('followuplist', '🔔 Follow-ups', 'panel-followup-full'),
+    dnrlist: () => renderPriorityView('dnrlist', '🚫 DNR', 'panel-dnr-full'),
   };
   document.getElementById('main').innerHTML = '';
   (views[view] || renderDashboard)();
@@ -484,6 +488,12 @@ async function loadDashboardPanels() {
         el.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
         return;
       }
+      
+      // Update sidebar badge counts
+      const badgeMap = { 'panel-never-called': 'badge-nevercalled', 'panel-roe': 'badge-roe', 'panel-followup': 'badge-followup', 'panel-dnr': 'badge-dnr' };
+      const badge = document.getElementById(badgeMap[panelId]);
+      if (badge) badge.textContent = data.results.length;
+      
       el.innerHTML = data.results.map(raw => {
         const p = raw.properties;
         const name = p.name || 'Unknown';
@@ -1191,6 +1201,168 @@ async function manualRefresh() {
   updateBadges();
   if (btn) { btn.textContent = '⟳ Refresh'; btn.disabled = false; }
   toast('Data refreshed ✓', 'success');
+}
+
+// ─── PRIORITY VIEW SESSION STATE ──────────────────────────────────────────────
+const skipState = {
+  nevercalled: new Set(),
+  roerisklist: new Set(),
+  followuplist: new Set(),
+  dnrlist: new Set(),
+};
+
+async function renderPriorityView(viewKey, title, panelKey) {
+  const now = Date.now();
+  const days14 = new Date(now - 14 * 86400000).toISOString();
+  const days3 = new Date(now - 3 * 86400000).toISOString();
+
+  const filterMap = {
+    nevercalled: [{
+      filters: [
+        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
+        { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
+      ]
+    }, {
+      filters: [
+        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
+        { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY' },
+      ]
+    }],
+    roerisklist: [{
+      filters: [
+        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
+        { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
+        { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days14 },
+      ]
+    }, {
+      filters: [
+        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
+        { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
+        { propertyName: 'hubspot_owner_assigneddate', operator: 'LT', value: days3 },
+        { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
+      ]
+    }],
+    followuplist: [{
+      filters: [
+        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
+        { propertyName: 'subscription_status', operator: 'IN', values: ['Demo Set', 'Demo Completed', 'Contract Sent', 'Contract Revision'] },
+        { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days3 },
+        { propertyName: 'notes_next_activity_date', operator: 'NOT_HAS_PROPERTY' },
+      ]
+    }],
+    dnrlist: [{
+      filters: [
+        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
+        { propertyName: 'dnr', operator: 'EQ', value: 'Yes' },
+      ]
+    }],
+  };
+
+  document.getElementById('main').innerHTML = `
+    <div class="topbar">
+      <div class="topbar-left">
+        <h2>${title}</h2>
+        <p id="priority-count">Loading...</p>
+      </div>
+      <div class="topbar-right">
+        <button class="btn" onclick="showView('dashboard')">← Dashboard</button>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me call scripts for my ${title} companies')">✨ AI scripts</button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="ai-insight" style="margin-bottom:4px">
+        <div class="ai-insight-body" style="font-size:12px">
+          ☑️ Check a company to include it in your dialer session · Uncheck to skip it · Skips reset when you leave this view
+        </div>
+      </div>
+      <div id="priority-list" class="lead-list">
+        <div class="loading-state"><span class="spinner"></span> Loading...</div>
+      </div>
+    </div>`;
+
+  try {
+    const data = await hsPost('/crm/v3/objects/companies/search', {
+      filterGroups: filterMap[viewKey],
+      properties: ['name', 'phone', 'city', 'state', 'hubspot_owner_id', 'hs_last_logged_call_date', 'subscription_status', 'dnr', 'notes_last_contacted'],
+      sorts: [{ propertyName: 'hs_last_logged_call_date', direction: 'ASCENDING' }],
+      limit: 100,
+    });
+
+    const results = data.results || [];
+    const countEl = document.getElementById('priority-count');
+    if (countEl) countEl.textContent = `${results.length} companies`;
+
+    // Update sidebar badge
+    const badgeMap = { nevercalled: 'badge-nevercalled', roerisklist: 'badge-roe', followuplist: 'badge-followup', dnrlist: 'badge-dnr' };
+    const badge = document.getElementById(badgeMap[viewKey]);
+    if (badge) badge.textContent = results.length;
+
+    renderPriorityList(viewKey, results);
+  } catch(e) {
+    const list = document.getElementById('priority-list');
+    if (list) list.innerHTML = '<div class="empty-state">Failed to load</div>';
+  }
+}
+
+function renderPriorityList(viewKey, results) {
+  const list = document.getElementById('priority-list');
+  if (!list) return;
+
+  if (!results.length) {
+    list.innerHTML = '<div class="empty-state">🎉 Nothing here!</div>';
+    return;
+  }
+
+  const skipped = skipState[viewKey];
+
+  list.innerHTML = results.map(raw => {
+    const p = raw.properties;
+    const name = p.name || 'Unknown';
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+    const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${raw.id}`;
+    const cleanPhone = p.phone ? p.phone.replace(/\D/g,'') : '';
+    const lastCall = p.hs_last_logged_call_date ? new Date(p.hs_last_logged_call_date).toLocaleDateString() : 'Never';
+    const isSkipped = skipped.has(raw.id);
+    const colors = [
+      {bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},
+      {bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},
+      {bg:'rgba(245,166,35,.2)',color:'#f5a623'},
+      {bg:'rgba(240,82,82,.2)',color:'#f05252'},
+      {bg:'rgba(167,139,250,.2)',color:'#a78bfa'},
+    ];
+    const ac = colors[parseInt(raw.id,10) % colors.length];
+
+    return `<div class="lead-card ${isSkipped ? 'skipped' : ''}" id="priority-row-${raw.id}" style="opacity:${isSkipped ? '0.45' : '1'};border-left:3px solid ${isSkipped ? 'var(--text3)' : 'var(--blue)'}">
+      <div style="display:flex;align-items:center;gap:10px;flex:1">
+        <input type="checkbox" ${isSkipped ? '' : 'checked'} onchange="toggleSkip('${viewKey}','${raw.id}',this.checked,'${name.replace(/'/g,"\\'")}',${JSON.stringify(results).replace(/'/g,"\\'")})" style="width:16px;height:16px;cursor:pointer;flex-shrink:0" title="${isSkipped ? 'Skipped' : 'Active'}" />
+        <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0">${initials}</div>
+        <div style="flex:1;min-width:0">
+          <div class="lead-name" style="display:flex;align-items:center;gap:8px">
+            ${isSkipped ? '🚫 ' : ''}${name}
+            <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
+          </div>
+          <div class="lead-meta" style="margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span>${p.city ? `${p.city}, ${p.state}` : 'No location'}</span>
+            <span>·</span>
+            <span>Last call: ${lastCall}</span>
+            ${p.subscription_status ? `<span>·</span><span style="color:var(--amber)">${p.subscription_status}</span>` : ''}
+          </div>
+        </div>
+        <div style="flex-shrink:0;font-size:15px;font-weight:700;color:${isSkipped ? 'var(--text3)' : 'var(--green)'}">
+          ${isSkipped ? '—' : (p.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px">📞 ${p.phone}</a>` : '<span style="color:var(--text3);font-size:12px">No phone</span>')}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleSkip(viewKey, companyId, isChecked, name, results) {
+  if (isChecked) {
+    skipState[viewKey].delete(companyId);
+  } else {
+    skipState[viewKey].add(companyId);
+  }
+  renderPriorityList(viewKey, results);
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
