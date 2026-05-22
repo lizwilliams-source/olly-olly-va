@@ -10,61 +10,78 @@ const state = {
   chatHistory: [],
   user: null,
   ownerId: null,
+  token: null,
+  isAdmin: false,
 };
 
-// ─── CLERK AUTH ───────────────────────────────────────────────────────────────
-let clerk;
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
+async function login() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value.trim();
+  const errorEl = document.getElementById('login-error');
+  errorEl.style.display = 'none';
 
-async function initClerk() {
-  const publishableKey = window.__CLERK_PUBLISHABLE_KEY__;
-  if (!publishableKey) {
-    console.error('No Clerk publishable key found');
+  if (!email || !password) {
+    errorEl.textContent = 'Email and password required';
+    errorEl.style.display = 'block';
     return;
   }
 
-  clerk = window.Clerk;
-  await clerk.load({ publishableKey });
-
-  if (clerk.user) {
-    await onSignedIn();
-  } else {
-    showLoginScreen();
-    clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
-      afterSignInUrl: window.location.href,
+  try {
+    const res = await fetch('/api/users?action=login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
     });
-    clerk.addListener(({ user }) => {
-      if (user) onSignedIn();
-    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorEl.textContent = data.error || 'Invalid email or password';
+      errorEl.style.display = 'block';
+      return;
+    }
+    localStorage.setItem('oo_token', data.token);
+    state.token = data.token;
+    state.user = { email: data.email, name: data.name };
+    state.ownerId = data.ownerId;
+    state.isAdmin = data.isAdmin;
+    showApp();
+  } catch (e) {
+    errorEl.textContent = 'Something went wrong. Try again.';
+    errorEl.style.display = 'block';
   }
 }
 
-async function onSignedIn() {
-  const user = clerk.user;
-  const email = user.primaryEmailAddress?.emailAddress;
-  const name = user.firstName || email;
+async function checkSession() {
+  const token = localStorage.getItem('oo_token');
+  if (!token) { showLogin(); return; }
 
-  state.user = { email, name };
+  try {
+    const res = await fetch('/api/users?action=verify', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) { showLogin(); return; }
+    const data = await res.json();
+    state.token = token;
+    state.user = { email: data.email, name: data.name };
+    state.ownerId = data.ownerId;
+    state.isAdmin = data.isAdmin;
+    showApp();
+  } catch (e) {
+    showLogin();
+  }
+}
 
-  // Show app
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
+}
+
+function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'grid';
-  document.getElementById('user-info').textContent = `👤 ${name}`;
+  document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
+  if (state.isAdmin) document.getElementById('admin-nav').style.display = 'flex';
 
-  // Get HubSpot owner ID
-  try {
-    const token = await clerk.session.getToken();
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    });
-    const data = await res.json();
-    state.ownerId = data.ownerId;
-    console.log('Owner ID:', state.ownerId);
-  } catch (e) {
-    console.error('Failed to get owner ID:', e);
-  }
-
-  // Init app
   document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', () => showView(item.dataset.view));
   });
@@ -72,27 +89,21 @@ async function onSignedIn() {
     if (e.target === document.getElementById('modal')) closeModal();
   });
 
-  await init();
-}
-
-function showLoginScreen() {
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('app-screen').style.display = 'none';
+  init();
 }
 
 async function signOut() {
-  await clerk.signOut();
-  showLoginScreen();
+  await fetch('/api/users?action=logout', {
+    headers: { Authorization: `Bearer ${state.token}` },
+  });
+  localStorage.removeItem('oo_token');
+  state.token = null;
+  state.user = null;
+  state.ownerId = null;
+  showLogin();
 }
 
 // ─── HubSpot API ──────────────────────────────────────────────────────────────
-async function hsGet(path) {
-  const res = await fetch('/api/hubspot', {
-    headers: { 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'GET' },
-  });
-  return res.json();
-}
-
 async function hsPost(path, body) {
   const res = await fetch('/api/hubspot', {
     method: 'POST',
@@ -237,7 +248,7 @@ async function askAI(userMsg, extraContext = '') {
     `${c.name} (score ${c.score}, last contact: ${c.lastContacted}, stage: ${c.stage}, location: ${c.city} ${c.state})`
   ).join('\n');
 
-  const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies and leads.
+  const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.
 
 Their current companies (top 20):
 ${contactSummary}
@@ -278,6 +289,7 @@ function showView(view) {
     pipeline: renderPipeline,
     ai: renderAI,
     coaching: renderCoaching,
+    admin: renderAdmin,
   };
   document.getElementById('main').innerHTML = '';
   (views[view] || renderDashboard)();
@@ -337,7 +349,7 @@ async function renderDashboard() {
         <div class="ai-chip" onclick="openAIWithPrompt('Give me a coaching tip for my hardest objection today')">Get coaching tip ↗</div>
       </div>`;
   } catch(e) {
-    document.querySelector('#ai-daily-insight .ai-insight-body').textContent = 'AI briefing unavailable — check your Anthropic API key in Vercel.';
+    document.querySelector('#ai-daily-insight .ai-insight-body').textContent = 'AI briefing unavailable.';
   }
 }
 
@@ -529,7 +541,7 @@ function renderAI() {
       <div class="chat-messages" id="chat-messages">
         <div class="msg ai">
           <div class="msg-label">Assistant</div>
-          <div class="msg-bubble">Hi ${state.user?.name || 'there'}! I'm connected to your HubSpot companies and ready to help. I can draft follow-up emails, help you prioritize your day, write call scripts, analyze your pipeline, or coach you through tough conversations. What do you need?</div>
+          <div class="msg-bubble">Hi ${state.user?.name || 'there'}! I'm connected to your HubSpot companies and ready to help. What do you need?</div>
         </div>
         <div class="ai-chips" style="padding:0 0 8px">
           <div class="ai-chip" onclick="sendPreset('Who are my top 3 companies to focus on today and why?')">Today's priorities ↗</div>
@@ -610,7 +622,7 @@ function scrollChat() {
 function renderCoaching() {
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🎯 Sales Coaching</h2><p>Coming soon — AI-powered tips, scripts, and objection handling</p></div>
+      <div class="topbar-left"><h2>🎯 Sales Coaching</h2><p>Coming soon</p></div>
     </div>
     <div class="content">
       <div style="text-align:center;padding:60px 20px">
@@ -620,6 +632,93 @@ function renderCoaching() {
         <button class="btn btn-primary" onclick="openAIWithPrompt('Give me 3 sales coaching tips specific to selling SEO to home service contractors')">✨ Ask AI for coaching now</button>
       </div>
     </div>`;
+}
+
+// ── ADMIN ─────────────────────────────────────────────────────────────────────
+async function renderAdmin() {
+  if (!state.isAdmin) { showView('dashboard'); return; }
+
+  document.getElementById('main').innerHTML = `
+    <div class="topbar">
+      <div class="topbar-left"><h2>⚙️ Admin</h2><p>Manage team members</p></div>
+    </div>
+    <div class="content">
+      <div>
+        <div class="section-title" style="margin-bottom:12px">Add new user</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div><div class="field-label" style="margin-bottom:4px">Name</div><input id="new-name" placeholder="Jane Smith" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
+          <div><div class="field-label" style="margin-bottom:4px">Email</div><input id="new-email" placeholder="jane@ollyolly.com" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <div><div class="field-label" style="margin-bottom:4px">Password</div><input id="new-password" type="password" placeholder="Temp password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
+          <div style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" id="new-admin" /> Make admin</label></div>
+        </div>
+        <button class="btn btn-primary" onclick="addUser()">Add user</button>
+        <span id="add-msg" style="font-size:12px;margin-left:12px"></span>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:16px">
+        <div class="section-title" style="margin-bottom:12px">Team members</div>
+        <div id="user-list"><span class="spinner"></span> Loading...</div>
+      </div>
+    </div>`;
+
+  loadUserList();
+}
+
+async function loadUserList() {
+  const res = await fetch('/api/users?action=list', {
+    headers: { Authorization: `Bearer ${state.token}` },
+  });
+  const users = await res.json();
+  const list = document.getElementById('user-list');
+  if (!Array.isArray(users)) { list.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load users</div>'; return; }
+  list.innerHTML = users.map(u => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:13px;font-weight:500">${u.name} ${u.isAdmin ? '<span style="font-size:10px;background:var(--blue-dim);color:var(--blue);padding:1px 6px;border-radius:4px">admin</span>' : ''}</div>
+        <div style="font-size:11px;color:var(--text2)">${u.email} · HubSpot owner: ${u.ownerId || 'not found'}</div>
+      </div>
+      <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="deleteUser('${u.email}')">Remove</button>
+    </div>`).join('');
+}
+
+async function addUser() {
+  const name = document.getElementById('new-name').value.trim();
+  const email = document.getElementById('new-email').value.trim();
+  const password = document.getElementById('new-password').value.trim();
+  const isAdmin = document.getElementById('new-admin').checked;
+  const msg = document.getElementById('add-msg');
+
+  if (!email || !password) { msg.style.color = 'var(--red)'; msg.textContent = 'Email and password required'; return; }
+
+  const res = await fetch('/api/users?action=add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ name, email, password, isAdmin }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    msg.style.color = 'var(--green)';
+    msg.textContent = `✓ Added! HubSpot owner ID: ${data.ownerId || 'not found in HubSpot'}`;
+    document.getElementById('new-name').value = '';
+    document.getElementById('new-email').value = '';
+    document.getElementById('new-password').value = '';
+    loadUserList();
+  } else {
+    msg.style.color = 'var(--red)';
+    msg.textContent = data.error || 'Failed to add user';
+  }
+}
+
+async function deleteUser(email) {
+  if (!confirm(`Remove ${email}?`)) return;
+  await fetch('/api/users?action=delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ email }),
+  });
+  loadUserList();
 }
 
 // ── CONTACT MODAL ─────────────────────────────────────────────────────────────
@@ -744,14 +843,5 @@ async function init() {
   if (state.currentView === 'dashboard') showView('dashboard');
 }
 
-// ─── CLERK INIT ───────────────────────────────────────────────────────────────
-(async () => {
-  const publishableKey = await fetch('/api/clerk-key').then(r => r.json()).then(d => d.key).catch(() => null);
-  if (!publishableKey) {
-    document.getElementById('login-screen').style.display = 'flex';
-    document.getElementById('login-screen').innerHTML = '<div style="color:white;padding:40px">Missing Clerk publishable key — add CLERK_PUBLISHABLE_KEY to Vercel env variables.</div>';
-    return;
-  }
-  window.__CLERK_PUBLISHABLE_KEY__ = publishableKey;
-  await initClerk();
-})();
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+checkSession();
