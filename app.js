@@ -1234,7 +1234,62 @@ async function renderPriorityView(viewKey, title, panelKey) {
     });
 
     const results = data.results || [];
+    
+    // Batch fetch contact phone numbers
+    if (results.length > 0) {
+      try {
+        // Step 1: Get contact associations for all companies
+        const assocRes = await fetch('/api/hubspot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v4/associations/companies/contacts/batch/read', 'X-HubSpot-Method': 'POST' },
+          body: JSON.stringify({ inputs: results.map(r => ({ id: r.id })) }),
+        });
+        const assocData = await assocRes.json();
+        
+        // Build map of companyId -> first contactId
+        const contactMap = {};
+        if (assocData.results) {
+          assocData.results.forEach(r => {
+            if (r.to?.length) contactMap[r.from.id] = r.to[0].toObjectId;
+          });
+        }
+
+        // Step 2: Batch fetch contact phone numbers
+        const contactIds = [...new Set(Object.values(contactMap))];
+        if (contactIds.length > 0) {
+          const contactRes = await fetch('/api/hubspot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/contacts/batch/read', 'X-HubSpot-Method': 'POST' },
+            body: JSON.stringify({ 
+              inputs: contactIds.map(id => ({ id })),
+              properties: ['phone', 'mobilephone', 'firstname', 'lastname']
+            }),
+          });
+          const contactData = await contactRes.json();
+          
+          // Build contactId -> phone map
+          const phoneMap = {};
+          if (contactData.results) {
+            contactData.results.forEach(c => {
+              phoneMap[c.id] = c.properties.mobilephone || c.properties.phone || null;
+            });
+          }
+
+          // Merge phone numbers into results — prefer contact phone over company phone
+          results.forEach(r => {
+            const contactId = contactMap[r.id];
+            if (contactId && phoneMap[contactId]) {
+              r.properties.contactPhone = phoneMap[contactId];
+            }
+          });
+        }
+      } catch(e) {
+        console.error('Failed to fetch contact phones:', e);
+      }
+    }
+
     priorityResults[viewKey] = results;
+    
     const countEl = document.getElementById('priority-count');
     if (countEl) countEl.textContent = `${results.length} companies`;
 
@@ -1266,7 +1321,8 @@ function renderPriorityList(viewKey, results) {
     const name = p.name || 'Unknown';
     const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
     const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${raw.id}`;
-    const cleanPhone = p.phone ? p.phone.replace(/\D/g,'') : '';
+    const rawPhone = raw.properties.contactPhone || p.phone || '';
+    const cleanPhone = rawPhone ? rawPhone.replace(/\D/g,'') : '';
     const lastCall = p.hs_last_logged_call_date ? new Date(p.hs_last_logged_call_date).toLocaleDateString() : 'Never';
     const isSkipped = skipped.has(raw.id);
     const colors = [
@@ -1298,8 +1354,8 @@ function renderPriorityList(viewKey, results) {
       <div style="flex-shrink:0;min-width:140px;text-align:right">
         ${isSkipped 
           ? '<span style="color:var(--text3);font-size:12px">Skipped</span>'
-          : p.phone 
-            ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${p.phone}</a>`
+          : rawPhone 
+            ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${rawPhone}</a>`
             : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
       </div>
     </div>`;
