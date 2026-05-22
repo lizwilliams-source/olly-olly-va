@@ -384,9 +384,10 @@ async function renderDashboard() {
     <div class="topbar">
       <div class="topbar-left">
         <h2>Good morning, ${state.user?.name || ''} 👋</h2>
-        <p>${new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })} · ${callNeeded} companies need a call today</p>
+        <p>${new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })} · Updates every minute</p>
       </div>
       <div class="topbar-right">
+        <button id="refresh-btn" class="btn" onclick="manualRefresh()">⟳ Refresh</button>
         <button class="btn" onclick="showView('callqueue')">📞 Call Queue</button>
         <button class="btn btn-primary" onclick="showView('ai')">✨ Ask AI</button>
       </div>
@@ -1029,10 +1030,32 @@ function toast(msg, type = '') {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
+let refreshInterval = null;
+
 async function init() {
   showView('dashboard');
   await Promise.all([loadContacts(), loadDeals()]);
   if (state.currentView === 'dashboard') showView('dashboard');
+  startAutoRefresh();
+}
+
+function startAutoRefresh() {
+  if (refreshInterval) clearInterval(refreshInterval);
+  refreshInterval = setInterval(async () => {
+    await Promise.all([loadContacts(), loadDeals()]);
+    if (state.currentView === 'dashboard') showView('dashboard');
+    updateBadges();
+  }, 60000);
+}
+
+async function manualRefresh() {
+  const btn = document.getElementById('refresh-btn');
+  if (btn) { btn.textContent = '⟳ Refreshing...'; btn.disabled = true; }
+  await Promise.all([loadContacts(), loadDeals()]);
+  if (state.currentView === 'dashboard') showView('dashboard');
+  updateBadges();
+  if (btn) { btn.textContent = '⟳ Refresh'; btn.disabled = false; }
+  toast('Data refreshed ✓', 'success');
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
