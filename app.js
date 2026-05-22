@@ -12,6 +12,10 @@ const state = {
   ownerId: null,
   token: null,
   isAdmin: false,
+  queue: [],
+  contactsPage: 0,
+  contactsTotal: 0,
+  contactsPageSize: 50,
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -20,64 +24,38 @@ async function login() {
   const password = document.getElementById('login-password').value.trim();
   const errorEl = document.getElementById('login-error');
   errorEl.style.display = 'none';
-
-  if (!email || !password) {
-    errorEl.textContent = 'Email and password required';
-    errorEl.style.display = 'block';
-    return;
-  }
-
+  if (!email || !password) { errorEl.textContent = 'Email and password required'; errorEl.style.display = 'block'; return; }
   try {
-    const res = await fetch('/api/users?action=login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    const res = await fetch('/api/users?action=login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
     const data = await res.json();
-    if (!res.ok) {
-      errorEl.textContent = data.error || 'Invalid email or password';
-      errorEl.style.display = 'block';
-      return;
-    }
+    if (!res.ok) { errorEl.textContent = data.error || 'Invalid email or password'; errorEl.style.display = 'block'; return; }
     localStorage.setItem('oo_token', data.token);
     state.token = data.token;
     state.user = { email: data.email, name: data.name };
     state.ownerId = data.ownerId;
     state.isAdmin = data.isAdmin;
-    if (!data.ownerId) {
-      showOwnerSetup();
-    } else {
-      showApp();
-    }
-  } catch (e) {
-    errorEl.textContent = 'Something went wrong. Try again.';
-    errorEl.style.display = 'block';
-  }
+    if (!data.ownerId) { showOwnerSetup(); } else { showApp(); }
+  } catch (e) { errorEl.textContent = 'Something went wrong. Try again.'; errorEl.style.display = 'block'; }
 }
 
 async function checkSession() {
   const token = localStorage.getItem('oo_token');
   if (!token) { showLogin(); return; }
-
   try {
-    const res = await fetch('/api/users?action=verify', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await fetch('/api/users?action=verify', { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) { showLogin(); return; }
     const data = await res.json();
     state.token = token;
     state.user = { email: data.email, name: data.name };
     state.ownerId = data.ownerId;
     state.isAdmin = data.isAdmin;
+    if (!state.ownerId) { showOwnerSetup(); } else { showApp(); }
+  } catch (e) { showLogin(); }
+}
 
-    if (!state.ownerId) {
-      showOwnerSetup();
-    } else {
-      showApp();
-    }
-  } catch (e) {
-    showLogin();
-  }
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
 }
 
 function showOwnerSetup() {
@@ -90,68 +68,27 @@ async function saveOwnerFromUrl() {
   const url = document.getElementById('hs-url-input').value.trim();
   const errorEl = document.getElementById('owner-setup-error');
   errorEl.style.display = 'none';
-
-  // Parse contact or company ID from URL
   const contactMatch = url.match(/\/contact\/(\d+)/);
   const companyMatch = url.match(/\/company\/(\d+)/);
   const recordMatch = url.match(/\/record\/0-[12]\/(\d+)/);
   const isCompany = !!companyMatch || url.includes('/record/0-2/');
   const recordId = contactMatch?.[1] || companyMatch?.[1] || recordMatch?.[1];
-
-  if (!recordId) {
-    errorEl.textContent = 'Could not find a contact or company ID in that URL. Try copying the full URL from your browser.';
-    errorEl.style.display = 'block';
-    return;
-  }
-
+  if (!recordId) { errorEl.textContent = 'Could not find a contact or company ID in that URL.'; errorEl.style.display = 'block'; return; }
   const btn = document.getElementById('owner-setup-btn');
-  btn.textContent = 'Looking up...';
-  btn.disabled = true;
-
+  btn.textContent = 'Looking up...'; btn.disabled = true;
   try {
-    const path = isCompany
-      ? `/crm/v3/objects/companies/${recordId}?properties=hubspot_owner_id`
-      : `/crm/v3/objects/contacts/${recordId}?properties=hubspot_owner_id`;
-
-    const res = await fetch('/api/hubspot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'GET' },
-      body: JSON.stringify({}),
-    });
+    const path = isCompany ? `/crm/v3/objects/companies/${recordId}?properties=hubspot_owner_id` : `/crm/v3/objects/contacts/${recordId}?properties=hubspot_owner_id`;
+    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'GET' }, body: JSON.stringify({}) });
     const data = await res.json();
     const ownerId = data.properties?.hubspot_owner_id;
-
-    if (!ownerId) {
-      errorEl.textContent = 'That record doesn\'t have an owner assigned. Try a different contact or company that\'s assigned to you.';
-      errorEl.style.display = 'block';
-      btn.textContent = 'Set up my account';
-      btn.disabled = false;
-      return;
-    }
-
-    // Save owner ID to user profile
-    const saveRes = await fetch('/api/users?action=setowner', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ ownerId }),
-    });
+    if (!ownerId) { errorEl.textContent = "That record doesn't have an owner assigned. Try a different one."; errorEl.style.display = 'block'; btn.textContent = 'Set up my account'; btn.disabled = false; return; }
+    const saveRes = await fetch('/api/users?action=setowner', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ ownerId }) });
     const saveData = await saveRes.json();
     if (!saveData.ok) throw new Error(saveData.error || 'Failed to save');
-
     state.ownerId = ownerId;
     document.getElementById('owner-setup-screen').style.display = 'none';
     showApp();
-  } catch (e) {
-    errorEl.textContent = 'Something went wrong: ' + e.message;
-    errorEl.style.display = 'block';
-    btn.textContent = 'Set up my account';
-    btn.disabled = false;
-  }
-}
-
-function showLogin() {
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('app-screen').style.display = 'none';
+  } catch (e) { errorEl.textContent = 'Something went wrong: ' + e.message; errorEl.style.display = 'block'; btn.textContent = 'Set up my account'; btn.disabled = false; }
 }
 
 function showApp() {
@@ -159,95 +96,99 @@ function showApp() {
   document.getElementById('app-screen').style.display = 'grid';
   document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
   if (state.isAdmin) document.getElementById('admin-nav').style.display = 'flex';
-
-  document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => showView(item.dataset.view));
-  });
-  document.getElementById('modal').addEventListener('click', e => {
-    if (e.target === document.getElementById('modal')) closeModal();
-  });
-
+  document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => showView(item.dataset.view)); });
+  document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal')) closeModal(); });
   init();
 }
 
 async function signOut() {
-  await fetch('/api/users?action=logout', {
-    headers: { Authorization: `Bearer ${state.token}` },
-  });
+  await fetch('/api/users?action=logout', { headers: { Authorization: `Bearer ${state.token}` } });
   localStorage.removeItem('oo_token');
-  state.token = null;
-  state.user = null;
-  state.ownerId = null;
+  state.token = null; state.user = null; state.ownerId = null;
   showLogin();
 }
 
 // ─── HubSpot API ──────────────────────────────────────────────────────────────
 async function hsPost(path, body) {
-  const res = await fetch('/api/hubspot', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'POST' },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'POST' }, body: JSON.stringify(body) });
   return res.json();
 }
 
 async function hsPatch(path, body) {
-  const res = await fetch('/api/hubspot', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'PATCH' },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'PATCH' }, body: JSON.stringify(body) });
   return res.json();
 }
 
 // ─── LOAD DATA ────────────────────────────────────────────────────────────────
-async function loadContacts() {
+const COMPANY_PROPS = [
+  'name', 'phone', 'city', 'state', 'website',
+  'hubspot_owner_id', 'notes_last_contacted', 'num_contacted_notes',
+  'lifecyclestage', 'hs_lead_status', 'createdate', 'lastmodifieddate',
+  'industry', 'timezone', 'lead_source', 'subscription_status',
+  'hs_last_logged_call_date', 'dnr', 'recent_user_to_call',
+  'hubspot_owner_assigneddate', 'notes_next_activity_date'
+];
+
+async function loadContacts(after = null) {
   try {
-    const filterGroups = state.ownerId ? [{
-      filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }]
-    }] : [];
-
-    const data = await hsPost('/crm/v3/objects/companies/search', {
-      filterGroups,
-      properties: [
-        'name', 'phone', 'city', 'state', 'website',
-        'hubspot_owner_id', 'notes_last_contacted',
-        'num_contacted_notes', 'hs_last_sales_activity_timestamp',
-        'lifecyclestage', 'hs_lead_status', 'createdate', 'lastmodifieddate',
-        'annualrevenue', 'numberofemployees', 'industry'
-      ],
-      sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }],
-      limit: 100,
-    });
-
+    const filterGroups = state.ownerId ? [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }] }] : [];
+    const body = { filterGroups, properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 };
+    if (after) body.after = after;
+    const data = await hsPost('/crm/v3/objects/companies/search', body);
     if (data.results) {
-      state.contacts = data.results.map(enrichContact);
+      const enriched = data.results.map(enrichContact);
+      if (after) { state.contacts = [...state.contacts, ...enriched]; }
+      else { state.contacts = enriched; }
       state.hsConnected = true;
       updateHsStatus(true);
       updateBadges();
+      // Paginate if more exist
+      if (data.paging?.next?.after) {
+        loadContacts(data.paging.next.after);
+      }
     }
-  } catch (e) {
-    console.error('Failed to load companies:', e);
-    updateHsStatus(false);
-  }
+  } catch (e) { console.error('Failed to load companies:', e); updateHsStatus(false); }
 }
 
-async function loadDeals() {
+async function loadQueue() {
   try {
-    const filterGroups = state.ownerId ? [{
-      filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }]
-    }] : [];
+    const res = await fetch('/api/users?action=getqueue', { headers: { Authorization: `Bearer ${state.token}` } });
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      state.queue = data;
+      const badge = document.getElementById('badge-queue');
+      if (badge) badge.textContent = state.queue.length;
+    }
+  } catch (e) { console.error('Failed to load queue:', e); }
+}
 
-    const data = await hsPost('/crm/v3/objects/deals/search', {
-      filterGroups,
-      properties: ['dealname', 'amount', 'dealstage', 'closedate', 'hubspot_owner_id', 'hs_lastmodifieddate'],
-      sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
-      limit: 50,
-    });
-    if (data.results) state.deals = data.results;
-  } catch (e) {
-    console.error('Failed to load deals:', e);
-  }
+async function addToQueue(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  if (!c) return;
+  const company = { id: c.id, name: c.name, phone: c.phone, city: c.city, state: c.state, timezone: c.timezone, leadSource: c.leadSource, stage: c.stage };
+  try {
+    const res = await fetch('/api/users?action=addqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ company }) });
+    const data = await res.json();
+    if (data.ok) {
+      if (!state.queue.find(q => q.id === companyId)) state.queue.push(company);
+      const badge = document.getElementById('badge-queue');
+      if (badge) badge.textContent = state.queue.length;
+      toast(`${c.name} added to queue ✓`, 'success');
+    }
+  } catch (e) { toast('Failed to add to queue', 'error'); }
+}
+
+async function removeFromQueue(companyId) {
+  try {
+    const res = await fetch('/api/users?action=removequeue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId }) });
+    const data = await res.json();
+    if (data.ok) {
+      state.queue = state.queue.filter(c => c.id !== companyId);
+      const badge = document.getElementById('badge-queue');
+      if (badge) badge.textContent = state.queue.length;
+      if (state.currentView === 'myqueue') renderMyQueue();
+    }
+  } catch (e) { toast('Failed to remove from queue', 'error'); }
 }
 
 function enrichContact(raw) {
@@ -258,51 +199,32 @@ function enrichContact(raw) {
   const urgency = score >= 80 ? 'urgent' : score >= 60 ? 'warm' : score >= 40 ? 'cool' : 'new';
   const name = p.name || 'Unknown Company';
   const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-
   return {
-    id: raw.id,
-    name,
-    phone: p.phone || '',
-    city: p.city || '',
-    state: p.state || '',
-    website: p.website || '',
-    industry: p.industry || '',
-    stage: p.lifecyclestage || p.hs_lead_status || 'lead',
-    ownerId: p.hubspot_owner_id || '',
-    daysSince,
-    lastContacted: lastContactedMs ? new Date(lastContactedMs).toLocaleDateString() : 'Never',
-    score,
-    urgency,
-    initials,
-    avatarColor: avatarColor(raw.id),
-    needsCall: daysSince > 7 || !lastContactedMs,
-    createdAt: p.createdate,
+    id: raw.id, name, phone: p.phone || '', city: p.city || '', state: p.state || '',
+    website: p.website || '', industry: p.industry || '', timezone: p.timezone || '',
+    leadSource: p.lead_source || '', stage: p.lifecyclestage || p.hs_lead_status || 'lead',
+    masterStage: p.subscription_status || '', ownerId: p.hubspot_owner_id || '',
+    daysSince, lastContacted: lastContactedMs ? new Date(lastContactedMs).toLocaleDateString() : 'Never',
+    score, urgency, initials, avatarColor: avatarColor(raw.id),
+    needsCall: daysSince > 7 || !lastContactedMs, createdAt: p.createdate,
   };
 }
 
 function calcScore(p, daysSince) {
   let s = 50;
-  if (daysSince <= 1) s += 20;
-  else if (daysSince <= 3) s += 10;
-  else if (daysSince <= 7) s += 0;
-  else if (daysSince <= 14) s -= 15;
-  else if (daysSince <= 30) s -= 25;
-  else s -= 35;
+  if (daysSince <= 1) s += 20; else if (daysSince <= 3) s += 10; else if (daysSince <= 7) s += 0;
+  else if (daysSince <= 14) s -= 15; else if (daysSince <= 30) s -= 25; else s -= 35;
   const stage = (p.lifecyclestage || '').toLowerCase();
-  if (stage === 'opportunity') s += 20;
-  else if (stage === 'salesqualifiedlead') s += 15;
-  else if (stage === 'marketingqualifiedlead') s += 10;
-  else if (stage === 'lead') s += 5;
+  if (stage === 'opportunity') s += 20; else if (stage === 'salesqualifiedlead') s += 15;
+  else if (stage === 'marketingqualifiedlead') s += 10; else if (stage === 'lead') s += 5;
   if (p.num_contacted_notes > 5) s += 10;
   return Math.max(0, Math.min(100, Math.round(s)));
 }
 
 function avatarColor(id) {
   const colors = [
-    { bg: 'rgba(79,142,247,.2)', color: '#4f8ef7' },
-    { bg: 'rgba(62,207,142,.2)', color: '#3ecf8e' },
-    { bg: 'rgba(245,166,35,.2)', color: '#f5a623' },
-    { bg: 'rgba(240,82,82,.2)', color: '#f05252' },
+    { bg: 'rgba(79,142,247,.2)', color: '#4f8ef7' }, { bg: 'rgba(62,207,142,.2)', color: '#3ecf8e' },
+    { bg: 'rgba(245,166,35,.2)', color: '#f5a623' }, { bg: 'rgba(240,82,82,.2)', color: '#f05252' },
     { bg: 'rgba(167,139,250,.2)', color: '#a78bfa' },
   ];
   return colors[parseInt(id, 10) % colors.length] || colors[0];
@@ -316,33 +238,18 @@ function updateHsStatus(ok) {
 function updateBadges() {
   const callNeeded = state.contacts.filter(c => c.needsCall).length;
   const followNeeded = state.contacts.filter(c => c.daysSince > 5 && c.daysSince < 30).length;
-  document.getElementById('call-badge').textContent = callNeeded;
-  document.getElementById('followup-badge').textContent = followNeeded;
+  document.getElementById('call-badge') && (document.getElementById('call-badge').textContent = callNeeded);
+  document.getElementById('followup-badge') && (document.getElementById('followup-badge').textContent = followNeeded);
 }
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
 async function askAI(userMsg, extraContext = '') {
   const contactSummary = state.contacts.slice(0, 20).map(c =>
-    `${c.name} (score ${c.score}, last contact: ${c.lastContacted}, stage: ${c.stage}, location: ${c.city} ${c.state})`
+    `${c.name} (score ${c.score}, last contact: ${c.lastContacted}, stage: ${c.masterStage || c.stage}, location: ${c.city} ${c.state}, timezone: ${c.timezone}, lead source: ${c.leadSource})`
   ).join('\n');
-
-  const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.
-
-Their current companies (top 20):
-${contactSummary}
-
-${extraContext}
-
-Be concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling. Use actual company names and details.`;
-
+  const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.\n\nTheir current companies (top 20):\n${contactSummary}\n\n${extraContext}\n\nBe concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling.`;
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
-
-  const res = await fetch('/api/ai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 1000, system, messages }),
-  });
-
+  const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 1000, system, messages }) });
   if (!res.ok) throw new Error(`AI API error: ${res.status}`);
   const data = await res.json();
   if (data.error) throw new Error(JSON.stringify(data.error));
@@ -356,22 +263,18 @@ Be concise, friendly, and specific. When drafting emails, write the full email w
 // ─── VIEWS ────────────────────────────────────────────────────────────────────
 function showView(view) {
   state.currentView = view;
-  document.querySelectorAll('.nav-item').forEach(n => {
-    n.classList.toggle('active', n.dataset.view === view);
-  });
-const views = {
+  document.querySelectorAll('.nav-item').forEach(n => { n.classList.toggle('active', n.dataset.view === view); });
+  const views = {
     dashboard: renderDashboard,
-    callqueue: renderCallQueue,
-    followups: renderFollowups,
     contacts: renderContacts,
-    pipeline: renderPipeline,
+    myqueue: renderMyQueue,
     ai: renderAI,
     coaching: renderCoaching,
     admin: renderAdmin,
-    nevercalled: () => renderPriorityView('nevercalled', '📵 Never Called By Me', 'panel-never-called-full'),
-    roerisklist: () => renderPriorityView('roerisklist', '⚠️ ROE Risk', 'panel-roe-full'),
-    followuplist: () => renderPriorityView('followuplist', '🔔 Follow-ups', 'panel-followup-full'),
-    dnrlist: () => renderPriorityView('dnrlist', '🚫 DNR', 'panel-dnr-full'),
+    nevercalled: () => renderPriorityView('nevercalled', '📵 Never Called By Me'),
+    roerisklist: () => renderPriorityView('roerisklist', '⚠️ ROE Risk'),
+    followuplist: () => renderPriorityView('followuplist', '🔔 Follow-ups'),
+    dnrlist: () => renderPriorityView('dnrlist', '🚫 DNR'),
   };
   document.getElementById('main').innerHTML = '';
   (views[view] || renderDashboard)();
@@ -379,9 +282,9 @@ const views = {
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 async function renderDashboard() {
+  const hot = state.contacts.filter(c => c.score >= 80).length;
   const callNeeded = state.contacts.filter(c => c.needsCall).length;
   const followNeeded = state.contacts.filter(c => c.daysSince > 5).length;
-  const hot = state.contacts.filter(c => c.score >= 80).length;
 
   document.getElementById('main').innerHTML = `
     <div class="topbar">
@@ -391,11 +294,10 @@ async function renderDashboard() {
       </div>
       <div class="topbar-right">
         <button id="refresh-btn" class="btn" onclick="manualRefresh()">⟳ Refresh</button>
-        <button class="btn" onclick="showView('callqueue')">📞 Call Queue</button>
         <button class="btn btn-primary" onclick="showView('ai')">✨ Ask AI</button>
       </div>
     </div>
-<div class="content">
+    <div class="content">
       <div class="metrics-grid">
         <div class="metric-card blue"><div class="metric-label">My Companies</div><div class="metric-value">${state.contacts.length}</div><div class="metric-sub">Assigned to me</div></div>
         <div class="metric-card red"><div class="metric-label">Calls Needed</div><div class="metric-value">${callNeeded}</div><div class="metric-sub">Haven't called in 7+ days</div></div>
@@ -432,23 +334,16 @@ async function renderDashboard() {
       </div>
     </div>`;
 
-  // Load AI briefing async
   try {
-    const insight = await askAI(
-      `Give me a sharp 2-sentence morning briefing: which of my companies should I prioritize today and why? Be specific with names.`,
-      `Today's date: ${new Date().toLocaleDateString()}`
-    );
+    const insight = await askAI(`Give me a sharp 2-sentence morning briefing: which of my companies should I prioritize today and why? Be specific with names.`, `Today's date: ${new Date().toLocaleDateString()}`);
     document.querySelector('#ai-daily-insight .ai-insight-body').innerHTML = insight.replace(/\n/g,'<br>') +
       `<div class="ai-chips">
         <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
-        <div class="ai-chip" onclick="showView('callqueue')">Open call queue</div>
+        <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
         <div class="ai-chip" onclick="openAIWithPrompt('Give me a coaching tip for my hardest objection today')">Get coaching tip ↗</div>
       </div>`;
-  } catch(e) {
-    document.querySelector('#ai-daily-insight .ai-insight-body').textContent = 'AI briefing unavailable.';
-  }
+  } catch(e) { document.querySelector('#ai-daily-insight .ai-insight-body').textContent = 'AI briefing unavailable.'; }
 
-  // Load panels in background
   loadDashboardPanels();
 }
 
@@ -458,15 +353,9 @@ async function loadDashboardPanels() {
   const days14 = new Date(now - 14 * 86400000).toISOString();
   const days3 = new Date(now - 3 * 86400000).toISOString();
 
-  
-
-  async function fetchPanel(filterGroups, panelKey, countId, badgeId) {
+  async function fetchPanel(filterGroups, countId, badgeId) {
     try {
-      const data = await hsPost('/crm/v3/objects/companies/search', {
-        filterGroups,
-        properties: ['name'],
-        limit: 100,
-      });
+      const data = await hsPost('/crm/v3/objects/companies/search', { filterGroups, properties: ['name'], limit: 100 });
       const count = data.results?.length || 0;
       const countEl = document.getElementById(countId);
       if (countEl) countEl.textContent = count;
@@ -478,144 +367,18 @@ async function loadDashboardPanels() {
     }
   }
 
-  fetchPanel([{
-    filters: [
-      { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-      { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
-    ]
-  },{
-    filters: [
-      { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-      { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY' },
-    ]
-  }], 'never-called', 'count-nevercalled', 'badge-nevercalled');
-
-  fetchPanel([{
-    filters: [
-      { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-      { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
-      { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days14 },
-    ]
-  },{
-    filters: [
-      { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-      { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
-      { propertyName: 'hubspot_owner_assigneddate', operator: 'LT', value: days3 },
-      { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
-    ]
-  }], 'roe', 'count-roe', 'badge-roe');
-
-  fetchPanel([{
-    filters: [
-      { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-      { propertyName: 'subscription_status', operator: 'IN', values: ['Demo Set', 'Demo Completed', 'Contract Sent', 'Contract Revision'] },
-      { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days3 },
-      { propertyName: 'notes_next_activity_date', operator: 'NOT_HAS_PROPERTY' },
-    ]
-  }], 'followup', 'count-followup', 'badge-followup');
-
-  fetchPanel([{
-    filters: [
-      { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-      { propertyName: 'dnr', operator: 'EQ', value: 'Yes' },
-    ]
-  }], 'dnr', 'count-dnr', 'badge-dnr');
+  fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }, { filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY' }] }], 'count-nevercalled', 'badge-nevercalled');
+  fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' }, { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days14 }] }, { filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' }, { propertyName: 'hubspot_owner_assigneddate', operator: 'LT', value: days3 }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }], 'count-roe', 'badge-roe');
+  fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'subscription_status', operator: 'IN', values: ['Demo Set', 'Demo Completed', 'Contract Sent', 'Contract Revision'] }, { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days3 }, { propertyName: 'notes_next_activity_date', operator: 'NOT_HAS_PROPERTY' }] }], 'count-followup', 'badge-followup');
+  fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'EQ', value: 'Yes' }] }], 'count-dnr', 'badge-dnr');
 }
 
-// ── CALL QUEUE ────────────────────────────────────────────────────────────────
-function renderCallQueue() {
-  const toCall = [...state.contacts]
-    .filter(c => c.needsCall)
-    .sort((a, b) => b.score - a.score);
-
-  document.getElementById('main').innerHTML = `
-    <div class="topbar">
-      <div class="topbar-left"><h2>📞 Call Queue</h2><p>${toCall.length} companies need a call · Sorted by priority score</p></div>
-      <div class="topbar-right">
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me a call script for my top priority company today. Include an opener, key questions, and how to handle if they say they are busy.')">✨ Get call script</button>
-      </div>
-    </div>
-    <div class="content">
-      <div class="ai-insight">
-        <div class="ai-insight-header"><div class="ai-insight-icon">💡</div><div class="ai-insight-title">Smart Dialing Order</div></div>
-        <div class="ai-insight-body">Companies sorted by AI priority score. Call top scores first. Phone numbers are clickable — Aloware will intercept automatically. Companies with no call history are flagged 🆕.</div>
-      </div>
-      ${toCall.length === 0
-        ? '<div class="empty-state">🎉 No calls needed right now!</div>'
-        : '<div class="lead-list">' + toCall.map(callQueueItemHTML).join('') + '</div>'}
-    </div>`;
-}
-
-function callQueueItemHTML(c) {
-  const priority = c.score >= 80 ? 1 : c.score >= 60 ? 2 : 3;
-  const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
-  const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
-  const phoneDisplay = c.phone
-    ? `<a href="tel:${cleanPhone}" onclick="event.stopPropagation()" style="color:var(--green);text-decoration:none;font-weight:600" title="Click to call via Aloware">📞 ${c.phone}</a>`
-    : '<span style="color:var(--text3)">No phone</span>';
-  return `<div class="call-queue-item priority-${priority}" onclick="openContact('${c.id}')">
-    <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
-    <div style="min-width:0;flex:1">
-      <div class="lead-name" style="display:flex;align-items:center;gap:8px">
-        ${c.name} ${c.daysSince === 999 ? '🆕' : ''}
-        <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
-      </div>
-      <div class="lead-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:3px">
-        <span>${c.city ? `${c.city}, ${c.state}` : c.state || 'No location'}</span>
-        <span>·</span>
-        ${phoneDisplay}
-        <span>·</span>
-        <span>Last call: ${c.lastContacted}</span>
-      </div>
-    </div>
-    <div class="call-actions">
-      <button class="btn btn-sm btn-call" onclick="event.stopPropagation();logCall('${c.id}')">✅ Log call</button>
-      <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Write a call script for ${c.name}. Stage: ${c.stage}. Include opener, discovery questions, and objection handling.')">✨ Script</button>
-    </div>
-  </div>`;
-}
-
-// ── FOLLOW-UPS ────────────────────────────────────────────────────────────────
-function renderFollowups() {
-  const due = [...state.contacts]
-    .filter(c => c.daysSince > 5 && c.daysSince < 60)
-    .sort((a, b) => b.score - a.score);
-
-  document.getElementById('main').innerHTML = `
-    <div class="topbar">
-      <div class="topbar-left"><h2>🔔 Follow-ups</h2><p>${due.length} companies need a follow-up</p></div>
-      <div class="topbar-right">
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Draft follow-up emails for my top 5 companies that need outreach. Make each one personalized and specific.')">✨ Draft all emails</button>
-      </div>
-    </div>
-    <div class="content">
-      ${due.length === 0 ? '<div class="empty-state">🎉 All caught up!</div>' :
-        '<div class="lead-list">' + due.map(c => {
-          const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
-          return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
-            <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
-            <div>
-              <div class="lead-name" style="display:flex;align-items:center;gap:8px">
-                ${c.name}
-                <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
-              </div>
-              <div class="lead-meta">${c.city ? `${c.city}, ${c.state}` : 'No location'} · ${c.daysSince === 999 ? 'Never contacted' : `${c.daysSince} days since contact`}</div>
-            </div>
-            <div class="lead-right">
-              <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
-              <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Make it warm and specific.')">✨ Draft email</button>
-            </div>
-          </div>`;
-        }).join('') + '</div>'}
-    </div>`;
-}
-
-// ── COMPANIES ─────────────────────────────────────────────────────────────────
+// ── MY COMPANIES ──────────────────────────────────────────────────────────────
 function renderContacts() {
   const sorted = [...state.contacts].sort((a, b) => b.score - a.score);
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${sorted.length} companies assigned to you</p></div>
+      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${state.contacts.length} companies assigned to you</p></div>
       <div class="topbar-right">
         <input id="contact-search" placeholder="Search companies..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:200px" oninput="filterContacts(this.value)" />
       </div>
@@ -637,67 +400,276 @@ function filterContacts(q) {
 
 function leadCardHTML(c) {
   const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
+  const inQueue = state.queue.find(q => q.id === c.id);
   return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
     <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
-    <div>
+    <div style="flex:1;min-width:0">
       <div class="lead-name" style="display:flex;align-items:center;gap:8px">
         ${c.name}
         <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
       </div>
-      <div class="lead-meta">${c.city ? `${c.city}, ${c.state}` : 'No location'} · ${c.daysSince === 999 ? 'Never contacted' : `Last contact: ${c.lastContacted}`}</div>
+      <div class="lead-meta" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px">
+        ${c.timezone ? `<span>🕐 ${c.timezone}</span>` : ''}
+        ${c.leadSource ? `<span>· 📌 ${c.leadSource}</span>` : ''}
+        ${c.masterStage ? `<span>· <span style="color:var(--amber)">${c.masterStage}</span></span>` : ''}
+      </div>
     </div>
     <div class="lead-right">
       <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
-      <span class="last-contact">${c.stage}</span>
+      <button class="btn btn-sm" style="${inQueue ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="event.stopPropagation();${inQueue ? `removeFromQueue('${c.id}')` : `addToQueue('${c.id}')`}">${inQueue ? '✓ In Queue' : '+ Queue'}</button>
     </div>
   </div>`;
 }
 
-// ── PIPELINE ──────────────────────────────────────────────────────────────────
-function renderPipeline() {
-  const stages = {
-    lead: { label: 'Lead', class: 'prospect', contacts: [] },
-    marketingqualifiedlead: { label: 'MQL', class: 'prospect', contacts: [] },
-    salesqualifiedlead: { label: 'SQL', class: 'demo', contacts: [] },
-    opportunity: { label: 'Opportunity', class: 'negotiation', contacts: [] },
-    customer: { label: 'Customer', class: 'closed', contacts: [] },
-  };
-  state.contacts.forEach(c => {
-    const key = (c.stage || 'lead').toLowerCase().replace(/\s/g, '');
-    if (stages[key]) stages[key].contacts.push(c);
-    else stages['lead'].contacts.push(c);
-  });
-  const cols = Object.entries(stages).map(([, s]) => `
-    <div>
-      <div class="pipeline-col-header ${s.class}">${s.label} (${s.contacts.length})</div>
-      <div class="pipeline-cards">
-        ${s.contacts.length === 0 ? '<div style="font-size:11px;color:var(--text3);padding:8px 0">None</div>' :
-          s.contacts.map(c => {
+// ── MY QUEUE ──────────────────────────────────────────────────────────────────
+async function renderMyQueue() {
+  document.getElementById('main').innerHTML = `
+    <div class="topbar">
+      <div class="topbar-left"><h2>📋 My Queue</h2><p>${state.queue.length} companies in your queue</p></div>
+      <div class="topbar-right">
+        <button class="btn" onclick="clearQueue()">🗑 Clear queue</button>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me call scripts for all the companies in my queue')">✨ AI scripts</button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="ai-insight" style="margin-bottom:4px">
+        <div class="ai-insight-body" style="font-size:12px">
+          Your persistent call queue — companies stay here until you remove them. Phone numbers are clickable for Aloware.
+        </div>
+      </div>
+      <div id="queue-list" class="lead-list">
+        ${state.queue.length === 0 ? '<div class="empty-state">Your queue is empty. Add companies from any list using the + Queue button.</div>' :
+          state.queue.map(c => {
+            const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
             const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
-            return `<div class="pipeline-card" onclick="openContact('${c.id}')">
-              <div class="pipeline-card-name" style="display:flex;align-items:center;gap:6px">
-                ${c.name}
-                <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:9px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 5px;border-radius:4px">HS ↗</a>
+            const colors = [
+              {bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},
+              {bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},
+              {bg:'rgba(167,139,250,.2)',color:'#a78bfa'},
+            ];
+            const ac = colors[parseInt(c.id,10) % colors.length];
+            const initials = c.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+            return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--purple);border-radius:var(--radius)">
+              <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
+                  ${c.name}
+                  <a href="${hsUrl}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
+                </div>
+                <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
+                  ${c.timezone ? `<span>🕐 ${c.timezone}</span>` : ''}
+                  ${c.leadSource ? `<span>· 📌 ${c.leadSource}</span>` : ''}
+                  ${c.stage ? `<span>· <span style="color:var(--amber)">${c.stage}</span></span>` : ''}
+                </div>
               </div>
-              <div class="pipeline-card-company">${c.city ? `${c.city}, ${c.state}` : c.industry || 'No location'}</div>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-                <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}" style="font-size:9px">${c.score}</span>
-                <span style="font-size:10px;color:var(--text3)">${c.daysSince === 999 ? 'Never called' : `${c.daysSince}d ago`}</span>
+              <div style="flex-shrink:0;text-align:right;display:flex;align-items:center;gap:8px">
+                ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${c.phone}</a>` : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
+                <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="removeFromQueue('${c.id}')">Remove</button>
               </div>
             </div>`;
           }).join('')}
       </div>
-    </div>`).join('');
+    </div>`;
+}
+
+async function clearQueue() {
+  if (!confirm('Clear your entire queue?')) return;
+  await fetch('/api/users?action=clearqueue', { headers: { Authorization: `Bearer ${state.token}` } });
+  state.queue = [];
+  const badge = document.getElementById('badge-queue');
+  if (badge) badge.textContent = 0;
+  renderMyQueue();
+}
+
+// ── PRIORITY VIEWS ────────────────────────────────────────────────────────────
+const skipState = { nevercalled: new Set(), roerisklist: new Set(), followuplist: new Set(), dnrlist: new Set() };
+const priorityResults = {};
+let priorityPageSize = 50;
+let priorityPage = 0;
+
+async function renderPriorityView(viewKey, title) {
+  const now = Date.now();
+  const days14 = new Date(now - 14 * 86400000).toISOString();
+  const days3 = new Date(now - 3 * 86400000).toISOString();
+  priorityPage = 0;
+
+  const filterMap = {
+    nevercalled: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }, { filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY' }] }],
+    roerisklist: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' }, { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days14 }] }, { filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' }, { propertyName: 'hubspot_owner_assigneddate', operator: 'LT', value: days3 }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }],
+    followuplist: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'subscription_status', operator: 'IN', values: ['Demo Set', 'Demo Completed', 'Contract Sent', 'Contract Revision'] }, { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days3 }, { propertyName: 'notes_next_activity_date', operator: 'NOT_HAS_PROPERTY' }] }],
+    dnrlist: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'EQ', value: 'Yes' }] }],
+  };
+
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>📊 Pipeline</h2><p>${state.contacts.length} companies across stages</p></div>
+      <div class="topbar-left"><h2>${title}</h2><p id="priority-count">Loading...</p></div>
       <div class="topbar-right">
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Analyze my pipeline and tell me which companies are most likely to close this month and what I should do with each.')">✨ Analyze pipeline</button>
+        <button class="btn" onclick="showView('dashboard')">← Dashboard</button>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me call scripts for my ${title} companies')">✨ AI scripts</button>
       </div>
     </div>
     <div class="content">
-      <div class="pipeline-board">${cols}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="select-all" onchange="toggleSelectAll('${viewKey}',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--blue)" />
+          <label for="select-all" style="font-size:12px;color:var(--text2);cursor:pointer">Select all on page</label>
+          <button class="btn btn-sm" style="color:var(--purple);border-color:rgba(167,139,250,.3)" onclick="addPageToQueue('${viewKey}')">+ Add page to queue</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:12px;color:var(--text2)">Per page:</span>
+          ${[25,50,100].map(n => `<button class="btn btn-sm ${priorityPageSize===n?'btn-primary':''}" onclick="setPriorityPageSize('${viewKey}','${title}',${n})">${n}</button>`).join('')}
+        </div>
+      </div>
+      <div id="priority-list" class="lead-list">
+        <div class="loading-state"><span class="spinner"></span> Loading...</div>
+      </div>
+      <div id="priority-pagination" style="display:flex;justify-content:center;gap:8px;margin-top:12px"></div>
     </div>`;
+
+  try {
+    const data = await hsPost('/crm/v3/objects/companies/search', {
+      filterGroups: filterMap[viewKey],
+      properties: COMPANY_PROPS,
+      sorts: [{ propertyName: 'hs_last_logged_call_date', direction: 'ASCENDING' }],
+      limit: 100,
+    });
+    const results = data.results || [];
+
+    // Batch fetch contact phones
+    if (results.length > 0) {
+      try {
+        const assocRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v4/associations/companies/contacts/batch/read', 'X-HubSpot-Method': 'POST' }, body: JSON.stringify({ inputs: results.map(r => ({ id: r.id })) }) });
+        const assocData = await assocRes.json();
+        const contactMap = {};
+        if (assocData.results) assocData.results.forEach(r => { if (r.to?.length) contactMap[r.from.id] = r.to[0].toObjectId; });
+        const contactIds = [...new Set(Object.values(contactMap))];
+        if (contactIds.length > 0) {
+          const contactRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/contacts/batch/read', 'X-HubSpot-Method': 'POST' }, body: JSON.stringify({ inputs: contactIds.map(id => ({ id })), properties: ['phone', 'mobilephone'] }) });
+          const contactData = await contactRes.json();
+          const phoneMap = {};
+          if (contactData.results) contactData.results.forEach(c => { phoneMap[c.id] = c.properties.mobilephone || c.properties.phone || null; });
+          results.forEach(r => { const cid = contactMap[r.id]; if (cid && phoneMap[cid]) r.properties.contactPhone = phoneMap[cid]; });
+        }
+      } catch(e) { console.error('Phone fetch failed:', e); }
+    }
+
+    priorityResults[viewKey] = results;
+    const countEl = document.getElementById('priority-count');
+    if (countEl) countEl.textContent = `${results.length} companies`;
+    const badgeMap = { nevercalled: 'badge-nevercalled', roerisklist: 'badge-roe', followuplist: 'badge-followup', dnrlist: 'badge-dnr' };
+    const badge = document.getElementById(badgeMap[viewKey]);
+    if (badge) badge.textContent = results.length;
+    renderPriorityPage(viewKey);
+  } catch(e) {
+    const list = document.getElementById('priority-list');
+    if (list) list.innerHTML = '<div class="empty-state">Failed to load</div>';
+  }
+}
+
+function renderPriorityPage(viewKey) {
+  const results = priorityResults[viewKey] || [];
+  const skipped = skipState[viewKey];
+  const start = priorityPage * priorityPageSize;
+  const page = results.slice(start, start + priorityPageSize);
+
+  const list = document.getElementById('priority-list');
+  if (!list) return;
+  if (!results.length) { list.innerHTML = '<div class="empty-state">🎉 Nothing here!</div>'; return; }
+
+  list.innerHTML = page.map(raw => {
+    const p = raw.properties;
+    const name = p.name || 'Unknown';
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+    const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${raw.id}`;
+    const rawPhone = raw.properties.contactPhone || p.phone || '';
+    const cleanPhone = rawPhone ? rawPhone.replace(/\D/g,'') : '';
+    const isSkipped = skipped.has(raw.id);
+    const inQueue = state.queue.find(q => q.id === raw.id);
+    const colors = [{bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},{bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},{bg:'rgba(167,139,250,.2)',color:'#a78bfa'}];
+    const ac = colors[parseInt(raw.id,10) % colors.length];
+
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : inQueue ? 'var(--purple)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'};transition:opacity .15s" id="prow-${raw.id}">
+      <input type="checkbox" class="queue-cb" data-id="${raw.id}" data-name="${name.replace(/"/g,'')}" ${inQueue ? 'checked' : ''}
+        onchange="handleQueueCheckbox('${viewKey}','${raw.id}',this.checked)"
+        style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--purple)" />
+      <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
+          ${isSkipped ? '🚫 ' : ''}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</span>
+          <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;flex-shrink:0">HS ↗</a>
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
+          ${p.timezone ? `<span>🕐 ${p.timezone}</span>` : ''}
+          ${p.lead_source ? `<span>· 📌 ${p.lead_source}</span>` : ''}
+          ${p.subscription_status ? `<span>· <span style="color:var(--amber)">${p.subscription_status}</span></span>` : ''}
+        </div>
+      </div>
+      <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
+        <div style="min-width:140px;text-align:right">
+          ${isSkipped
+            ? '<span style="color:var(--text3);font-size:12px">Skipped</span>'
+            : rawPhone
+              ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${rawPhone}</a>`
+              : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
+        </div>
+        <button class="btn btn-sm" onclick="toggleSkip('${viewKey}','${raw.id}',${isSkipped})" style="${isSkipped ? 'color:var(--blue)' : 'color:var(--text2)'}">
+          ${isSkipped ? 'Unskip' : 'Skip'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Pagination
+  const totalPages = Math.ceil(results.length / priorityPageSize);
+  const pag = document.getElementById('priority-pagination');
+  if (pag && totalPages > 1) {
+    pag.innerHTML = Array.from({length: totalPages}, (_, i) => `
+      <button class="btn btn-sm ${i === priorityPage ? 'btn-primary' : ''}" onclick="goPriorityPage('${viewKey}',${i})">${i+1}</button>
+    `).join('');
+  }
+}
+
+function goPriorityPage(viewKey, page) {
+  priorityPage = page;
+  renderPriorityPage(viewKey);
+  document.getElementById('priority-list')?.scrollIntoView({ behavior: 'smooth' });
+}
+
+function setPriorityPageSize(viewKey, title, size) {
+  priorityPageSize = size;
+  priorityPage = 0;
+  renderPriorityPage(viewKey);
+  // Refresh topbar buttons
+  document.querySelectorAll('.per-page-btn').forEach(b => b.classList.remove('btn-primary'));
+}
+
+function toggleSelectAll(viewKey, checked) {
+  document.querySelectorAll('.queue-cb').forEach(cb => { cb.checked = checked; });
+}
+
+async function addPageToQueue(viewKey) {
+  const checkboxes = document.querySelectorAll('.queue-cb:checked');
+  let added = 0;
+  for (const cb of checkboxes) {
+    const id = cb.dataset.id;
+    if (!state.queue.find(q => q.id === id)) {
+      await addToQueue(id);
+      added++;
+    }
+  }
+  toast(`${added} companies added to queue ✓`, 'success');
+}
+
+async function handleQueueCheckbox(viewKey, companyId, checked) {
+  if (checked) { await addToQueue(companyId); }
+  else { await removeFromQueue(companyId); }
+  renderPriorityPage(viewKey);
+}
+
+function toggleSkip(viewKey, companyId, currentlySkipped) {
+  if (currentlySkipped) { skipState[viewKey].delete(companyId); }
+  else { skipState[viewKey].add(companyId); }
+  renderPriorityPage(viewKey);
 }
 
 // ── AI ASSISTANT ──────────────────────────────────────────────────────────────
@@ -708,8 +680,7 @@ function renderAI() {
     </div>
     <div class="chat-wrap">
       <div class="chat-messages" id="chat-messages">
-        <div class="msg ai">
-          <div class="msg-label">Assistant</div>
+        <div class="msg ai"><div class="msg-label">Assistant</div>
           <div class="msg-bubble">Hi ${state.user?.name || 'there'}! I'm connected to your HubSpot companies and ready to help. What do you need?</div>
         </div>
         <div class="ai-chips" style="padding:0 0 8px">
@@ -719,11 +690,7 @@ function renderAI() {
           <div class="ai-chip" onclick="sendPreset('Analyze my pipeline and tell me what is at risk')">Pipeline analysis ↗</div>
           <div class="ai-chip" onclick="sendPreset('Give me tips for handling the objection: we do not have budget right now')">Handle objection ↗</div>
         </div>
-        ${state.chatHistory.map(m => `
-          <div class="msg ${m.role === 'user' ? 'user' : 'ai'}">
-            <div class="msg-label">${m.role === 'user' ? 'You' : 'Assistant'}</div>
-            <div class="msg-bubble">${m.content.replace(/\n/g, '<br>')}</div>
-          </div>`).join('')}
+        ${state.chatHistory.map(m => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}"><div class="msg-label">${m.role === 'user' ? 'You' : 'Assistant'}</div><div class="msg-bubble">${m.content.replace(/\n/g, '<br>')}</div></div>`).join('')}
       </div>
       <div class="chat-input-area">
         <input id="chat-input" placeholder="Ask about a company, request a draft, get coaching..." onkeydown="if(event.key==='Enter')sendChat()" />
@@ -742,8 +709,7 @@ async function sendChat() {
   const loadId = appendLoading();
   try {
     const reply = await askAI(msg);
-    document.getElementById(loadId).outerHTML = `
-      <div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble">${reply.replace(/\n/g, '<br>')}</div></div>`;
+    document.getElementById(loadId).outerHTML = `<div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble">${reply.replace(/\n/g, '<br>')}</div></div>`;
   } catch(e) {
     document.getElementById(loadId).outerHTML = `<div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble" style="color:var(--red)">Error: ${e.message}</div></div>`;
   }
@@ -752,18 +718,12 @@ async function sendChat() {
 
 function sendPreset(msg) {
   if (state.currentView !== 'ai') showView('ai');
-  setTimeout(() => {
-    const input = document.getElementById('chat-input');
-    if (input) { input.value = msg; sendChat(); }
-  }, 100);
+  setTimeout(() => { const input = document.getElementById('chat-input'); if (input) { input.value = msg; sendChat(); } }, 100);
 }
 
 function openAIWithPrompt(msg) {
   showView('ai');
-  setTimeout(() => {
-    const input = document.getElementById('chat-input');
-    if (input) { input.value = msg; sendChat(); }
-  }, 150);
+  setTimeout(() => { const input = document.getElementById('chat-input'); if (input) { input.value = msg; sendChat(); } }, 150);
 }
 
 function appendMsg(role, text) {
@@ -790,9 +750,7 @@ function scrollChat() {
 // ── SALES COACHING ────────────────────────────────────────────────────────────
 function renderCoaching() {
   document.getElementById('main').innerHTML = `
-    <div class="topbar">
-      <div class="topbar-left"><h2>🎯 Sales Coaching</h2><p>Coming soon</p></div>
-    </div>
+    <div class="topbar"><div class="topbar-left"><h2>🎯 Sales Coaching</h2><p>Coming soon</p></div></div>
     <div class="content">
       <div style="text-align:center;padding:60px 20px">
         <div style="font-size:48px;margin-bottom:16px">🎯</div>
@@ -806,38 +764,19 @@ function renderCoaching() {
 // ── ADMIN ─────────────────────────────────────────────────────────────────────
 async function renderAdmin() {
   if (!state.isAdmin) { showView('dashboard'); return; }
-
   document.getElementById('main').innerHTML = `
-    <div class="topbar">
-      <div class="topbar-left"><h2>⚙️ Admin</h2><p>Manage team members</p></div>
-    </div>
+    <div class="topbar"><div class="topbar-left"><h2>⚙️ Admin</h2><p>Manage team members</p></div></div>
     <div class="content">
-
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-
-        <!-- SINGLE ADD -->
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem">
           <div class="section-title" style="margin-bottom:12px">Add one person</div>
-          <div style="margin-bottom:8px">
-            <div class="field-label" style="margin-bottom:4px">Full name</div>
-            <input id="new-name" placeholder="Jane Smith" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" oninput="autoFillUser()" />
-          </div>
-          <div style="margin-bottom:8px">
-            <div class="field-label" style="margin-bottom:4px">Email</div>
-            <input id="new-email" placeholder="Auto-filled from name" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
-          </div>
-          <div style="margin-bottom:12px">
-            <div class="field-label" style="margin-bottom:4px">Password</div>
-            <input id="new-password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" value="OllyOlly2025!" />
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" id="new-admin" /> Make admin</label>
-          </div>
+          <div style="margin-bottom:8px"><div class="field-label" style="margin-bottom:4px">Full name</div><input id="new-name" placeholder="Jane Smith" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" oninput="autoFillUser()" /></div>
+          <div style="margin-bottom:8px"><div class="field-label" style="margin-bottom:4px">Email</div><input id="new-email" placeholder="Auto-filled from name" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
+          <div style="margin-bottom:12px"><div class="field-label" style="margin-bottom:4px">Password</div><input id="new-password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" value="OllyOlly2025!" /></div>
+          <div style="margin-bottom:12px"><label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" id="new-admin" /> Make admin</label></div>
           <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="addUser()">Add user</button>
           <div id="add-msg" style="font-size:12px;margin-top:8px"></div>
         </div>
-
-        <!-- BULK ADD -->
         <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1rem">
           <div class="section-title" style="margin-bottom:4px">Bulk add</div>
           <div style="font-size:11px;color:var(--text2);margin-bottom:10px">One full name per line. Email and password auto-generated.</div>
@@ -846,92 +785,58 @@ async function renderAdmin() {
           <div id="bulk-msg" style="font-size:12px;margin-top:8px;line-height:1.6"></div>
         </div>
       </div>
-
       <div style="border-top:1px solid var(--border);padding-top:16px">
         <div class="section-title" style="margin-bottom:12px">Team members</div>
         <div id="user-list"><span class="spinner"></span> Loading...</div>
       </div>
     </div>`;
-
   loadUserList();
 }
 
 function autoFillUser() {
   const name = document.getElementById('new-name').value.trim();
-  const parts = name.split(' ');
-  if (parts.length >= 2) {
-    const email = `${parts[0].toLowerCase()}.${parts[parts.length-1].toLowerCase()}@ollyolly.com`;
-    document.getElementById('new-email').value = email;
-  }
+  const parts = name.split(' ').filter(p => !['jr','sr','ii','iii','iv','jr.','sr.'].includes(p.toLowerCase()));
+  if (parts.length >= 2) document.getElementById('new-email').value = `${parts[0].toLowerCase()}.${parts[parts.length-1].toLowerCase()}@ollyolly.com`;
 }
 
 async function bulkAddUsers() {
   const names = document.getElementById('bulk-names').value.trim().split('\n').map(n => n.trim()).filter(Boolean);
   const msg = document.getElementById('bulk-msg');
   if (!names.length) { msg.style.color = 'var(--red)'; msg.textContent = 'No names entered'; return; }
-
-  msg.style.color = 'var(--text2)';
-  msg.textContent = `Adding ${names.length} users...`;
-
+  msg.style.color = 'var(--text2)'; msg.textContent = `Adding ${names.length} users...`;
   const results = [];
   for (const name of names) {
     const parts = name.split(' ');
     if (parts.length < 2) { results.push(`⚠ ${name} — needs first and last name`); continue; }
     const email = `${parts[0].toLowerCase()}.${parts[parts.length-1].toLowerCase()}@ollyolly.com`;
-    const password = 'OllyOlly2025!';
     try {
-      const res = await fetch('/api/users?action=add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-        body: JSON.stringify({ name, email, password, isAdmin: false }),
-      });
+      const res = await fetch('/api/users?action=add', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ name, email, password: 'OllyOlly2025!', isAdmin: false }) });
       const data = await res.json();
-      if (res.ok && data.ok) {
-        results.push(`✓ ${name} — ${email}${data.ownerId ? '' : ' (no HubSpot match)'}`);
-      } else {
-        results.push(`✗ ${name} — ${data.error || 'Failed'}`);
-      }
-    } catch {
-      results.push(`✗ ${name} — failed`);
-    }
+      results.push(res.ok && data.ok ? `✓ ${name} — ${email}${data.ownerId ? '' : ' (no HubSpot match)'}` : `✗ ${name} — ${data.error || 'Failed'}`);
+    } catch { results.push(`✗ ${name} — failed`); }
   }
-
   msg.innerHTML = results.map(r => `<div style="color:${r.startsWith('✓') ? 'var(--green)' : r.startsWith('⚠') ? 'var(--amber)' : 'var(--red)'}">${r}</div>`).join('');
   document.getElementById('bulk-names').value = '';
   loadUserList();
 }
 
 async function loadUserList() {
-  const res = await fetch('/api/users?action=list', {
-    headers: { Authorization: `Bearer ${state.token}` },
-  });
+  const res = await fetch('/api/users?action=list', { headers: { Authorization: `Bearer ${state.token}` } });
   const users = await res.json();
   const list = document.getElementById('user-list');
   if (!Array.isArray(users)) { list.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load users</div>'; return; }
-  
   list.innerHTML = users.map(u => `
-    <div id="user-row-${u.email.replace(/[@.]/g,'-')}" style="padding:12px 0;border-bottom:1px solid var(--border)">
+    <div style="padding:12px 0;border-bottom:1px solid var(--border)">
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:center">
-        <div>
-          <div class="field-label" style="margin-bottom:3px">Name</div>
-          <input value="${u.name}" id="edit-name-${u.email.replace(/[@.]/g,'-')}" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" />
-        </div>
-        <div>
-          <div class="field-label" style="margin-bottom:3px">Email</div>
-          <input value="${u.email}" id="edit-email-${u.email.replace(/[@.]/g,'-')}" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" />
-        </div>
-        <div>
-          <div class="field-label" style="margin-bottom:3px">New password</div>
-          <input placeholder="Leave blank to keep" id="edit-pass-${u.email.replace(/[@.]/g,'-')}" type="password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" />
-        </div>
+        <div><div class="field-label" style="margin-bottom:3px">Name</div><input value="${u.name}" id="edit-name-${u.email.replace(/[@.]/g,'-')}" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" /></div>
+        <div><div class="field-label" style="margin-bottom:3px">Email</div><input value="${u.email}" id="edit-email-${u.email.replace(/[@.]/g,'-')}" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" /></div>
+        <div><div class="field-label" style="margin-bottom:3px">New password</div><input placeholder="Leave blank to keep" id="edit-pass-${u.email.replace(/[@.]/g,'-')}" type="password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" /></div>
         <div style="display:flex;flex-direction:column;gap:4px;padding-top:16px">
           <button class="btn btn-sm btn-primary" onclick="saveUser('${u.email}')">Save</button>
           <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="deleteUser('${u.email}')">Remove</button>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:6px">
-        HubSpot owner: ${u.ownerId || 'not found'} · ${u.isAdmin ? '<span style="color:var(--blue)">admin</span>' : 'standard user'}
-      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">HubSpot owner: ${u.ownerId || 'not found'} · ${u.isAdmin ? '<span style="color:var(--blue)">admin</span>' : 'standard user'}</div>
     </div>`).join('');
 }
 
@@ -940,12 +845,7 @@ async function saveUser(originalEmail) {
   const name = document.getElementById(`edit-name-${key}`).value.trim();
   const email = document.getElementById(`edit-email-${key}`).value.trim();
   const password = document.getElementById(`edit-pass-${key}`).value.trim();
-
-  const res = await fetch('/api/users?action=edit', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-    body: JSON.stringify({ originalEmail, email, name, password: password || null }),
-  });
+  const res = await fetch('/api/users?action=edit', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ originalEmail, email, name, password: password || null }) });
   const data = await res.json();
   if (data.ok) { toast('User updated ✓', 'success'); loadUserList(); }
   else toast(data.error || 'Failed to update', 'error');
@@ -957,35 +857,19 @@ async function addUser() {
   const password = document.getElementById('new-password').value.trim();
   const isAdmin = document.getElementById('new-admin').checked;
   const msg = document.getElementById('add-msg');
-
   if (!email || !password) { msg.style.color = 'var(--red)'; msg.textContent = 'Email and password required'; return; }
-
-  const res = await fetch('/api/users?action=add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-    body: JSON.stringify({ name, email, password, isAdmin }),
-  });
+  const res = await fetch('/api/users?action=add', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ name, email, password, isAdmin }) });
   const data = await res.json();
   if (data.ok) {
-    msg.style.color = 'var(--green)';
-    msg.textContent = `✓ Added! HubSpot owner ID: ${data.ownerId || 'not found in HubSpot'}`;
-    document.getElementById('new-name').value = '';
-    document.getElementById('new-email').value = '';
-    document.getElementById('new-password').value = '';
+    msg.style.color = 'var(--green)'; msg.textContent = `✓ Added! HubSpot owner ID: ${data.ownerId || 'not found in HubSpot'}`;
+    document.getElementById('new-name').value = ''; document.getElementById('new-email').value = ''; document.getElementById('new-password').value = '';
     loadUserList();
-  } else {
-    msg.style.color = 'var(--red)';
-    msg.textContent = data.error || 'Failed to add user';
-  }
+  } else { msg.style.color = 'var(--red)'; msg.textContent = data.error || 'Failed to add user'; }
 }
 
 async function deleteUser(email) {
   if (!confirm(`Remove ${email}?`)) return;
-  await fetch('/api/users?action=delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-    body: JSON.stringify({ email }),
-  });
+  await fetch('/api/users?action=delete', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ email }) });
   loadUserList();
 }
 
@@ -997,23 +881,20 @@ async function openContact(id) {
   const notes = state.notes[id] || [];
   const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
   const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
+  const inQueue = state.queue.find(q => q.id === c.id);
 
   document.getElementById('modal-title').innerHTML = `${c.name} <a href="${hsUrl}" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:none;font-weight:400">Open in HubSpot ↗</a>`;
   document.getElementById('modal-body').innerHTML = `
     <div class="field-row">
       <div><div class="field-label">Location</div><div class="field-value">${c.city ? `${c.city}, ${c.state}` : '—'}</div></div>
-      <div><div class="field-label">Industry</div><div class="field-value">${c.industry || '—'}</div></div>
+      <div><div class="field-label">Timezone</div><div class="field-value">${c.timezone || '—'}</div></div>
     </div>
     <div class="field-row">
-      <div><div class="field-label">Phone</div><div class="field-value">
-        ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:600">📞 ${c.phone}</a>` : '—'}
-      </div></div>
-      <div><div class="field-label">Website</div><div class="field-value">
-        ${c.website ? `<a href="${c.website}" target="_blank" style="color:var(--blue);text-decoration:none">${c.website}</a>` : '—'}
-      </div></div>
+      <div><div class="field-label">Phone</div><div class="field-value">${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:600">📞 ${c.phone}</a>` : '—'}</div></div>
+      <div><div class="field-label">Lead Source</div><div class="field-value">${c.leadSource || '—'}</div></div>
     </div>
     <div class="field-row">
-      <div><div class="field-label">Stage</div><div class="field-value">${c.stage}</div></div>
+      <div><div class="field-label">Stage</div><div class="field-value">${c.masterStage || c.stage}</div></div>
       <div><div class="field-label">AI Score</div><div class="field-value" style="color:var(--${c.urgency === 'urgent' ? 'red' : c.urgency === 'warm' ? 'amber' : 'blue'})">${c.score} / 100</div></div>
     </div>
     <div class="field-row">
@@ -1028,16 +909,17 @@ async function openContact(id) {
     <div style="border-top:1px solid var(--border);padding-top:14px">
       <div class="field-label" style="margin-bottom:8px">Notes (${notes.length})</div>
       <div class="notes-area" id="notes-list">
-        ${notes.length === 0 ? '<div style="font-size:12px;color:var(--text3)">No notes yet</div>' :
-          notes.map(n => `<div class="note-card"><div class="note-meta">${n.date}</div><div class="note-body">${n.text}</div></div>`).join('')}
+        ${notes.length === 0 ? '<div style="font-size:12px;color:var(--text3)">No notes yet</div>' : notes.map(n => `<div class="note-card"><div class="note-meta">${n.date}</div><div class="note-body">${n.text}</div></div>`).join('')}
       </div>
     </div>`;
 
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
-    <button class="btn btn-sm" onclick="logCall('${id}')">✅ Log call</button>
-    <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
-    <button class="btn btn-primary btn-sm" onclick="openAIWithPrompt('Give me a call script for ${c.name}. Stage: ${c.stage}. Include opener, key questions, and objection handling.')">📞 Call script</button>`;
+    <button class="btn btn-sm ${inQueue ? 'btn-primary' : ''}" onclick="${inQueue ? `removeFromQueue('${id}')` : `addToQueue('${id}')`}; closeModal()">
+      ${inQueue ? '✓ In Queue' : '+ Add to Queue'}
+    </button>
+    <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.masterStage || c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
+    <button class="btn btn-primary btn-sm" onclick="openAIWithPrompt('Give me a call script for ${c.name}. Stage: ${c.masterStage || c.stage}. Include opener, key questions, and objection handling.')">📞 Call script</button>`;
 
   document.getElementById('modal').style.display = 'flex';
 }
@@ -1047,68 +929,28 @@ async function saveNote(contactId) {
   const text = input.value.trim();
   if (!text) return;
   try {
-    await hsPost('/crm/v3/objects/notes', {
-      properties: { hs_note_body: text, hs_timestamp: Date.now() },
-      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
-    });
+    await hsPost('/crm/v3/objects/notes', { properties: { hs_note_body: text, hs_timestamp: Date.now() }, associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }] });
     toast('Note saved to HubSpot ✓', 'success');
-  } catch {
-    toast('Saved locally (HubSpot sync failed)', 'error');
-  }
+  } catch { toast('Saved locally (HubSpot sync failed)', 'error'); }
   if (!state.notes[contactId]) state.notes[contactId] = [];
   state.notes[contactId].unshift({ text, date: new Date().toLocaleString() });
   input.value = '';
   const list = document.getElementById('notes-list');
-  if (list) list.innerHTML = state.notes[contactId].map(n =>
-    `<div class="note-card"><div class="note-meta">${n.date}</div><div class="note-body">${n.text}</div></div>`
-  ).join('');
+  if (list) list.innerHTML = state.notes[contactId].map(n => `<div class="note-card"><div class="note-meta">${n.date}</div><div class="note-body">${n.text}</div></div>`).join('');
 }
 
 async function logCall(contactId) {
   const c = state.contacts.find(x => x.id === contactId);
   if (!c) return;
   try {
-    await hsPost('/crm/v3/objects/calls', {
-      properties: {
-        hs_call_body: `Call logged via Olly Olly Virtual Assistant`,
-        hs_timestamp: Date.now(),
-        hs_call_status: 'COMPLETED',
-        hs_call_duration: 0,
-      },
-      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 182 }] }],
-    });
+    await hsPost('/crm/v3/objects/calls', { properties: { hs_call_body: `Call logged via Olly Olly Virtual Assistant`, hs_timestamp: Date.now(), hs_call_status: 'COMPLETED', hs_call_duration: 0 }, associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 182 }] }] });
     toast(`Call logged for ${c.name} ✓`, 'success');
     const contact = state.contacts.find(x => x.id === contactId);
-    if (contact) {
-      contact.daysSince = 0;
-      contact.lastContacted = new Date().toLocaleDateString();
-      contact.needsCall = false;
-      contact.score = Math.min(100, contact.score + 10);
-      updateBadges();
-    }
-  } catch {
-    toast('Failed to log call', 'error');
-  }
+    if (contact) { contact.daysSince = 0; contact.lastContacted = new Date().toLocaleDateString(); contact.needsCall = false; contact.score = Math.min(100, contact.score + 10); updateBadges(); }
+  } catch { toast('Failed to log call', 'error'); }
 }
 
-function closeModal() {
-  document.getElementById('modal').style.display = 'none';
-}
-
-async function editUser(email, name) {
-  const newName = prompt('Name:', name);
-  if (!newName) return;
-  const newPassword = prompt('New password (leave blank to keep current):', '');
-  
-  const res = await fetch('/api/users?action=edit', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-    body: JSON.stringify({ email, name: newName, password: newPassword || null }),
-  });
-  const data = await res.json();
-  if (data.ok) { toast('User updated ✓', 'success'); loadUserList(); }
-  else toast(data.error || 'Failed to update', 'error');
-}
+function closeModal() { document.getElementById('modal').style.display = 'none'; }
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function toast(msg, type = '') {
@@ -1119,12 +961,12 @@ function toast(msg, type = '') {
   setTimeout(() => el.remove(), 3500);
 }
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
+// ─── REFRESH ──────────────────────────────────────────────────────────────────
 let refreshInterval = null;
 
 async function init() {
   showView('dashboard');
-  await Promise.all([loadContacts(), loadDeals()]);
+  await Promise.all([loadContacts(), loadQueue()]);
   if (state.currentView === 'dashboard') showView('dashboard');
   startAutoRefresh();
 }
@@ -1132,7 +974,7 @@ async function init() {
 function startAutoRefresh() {
   if (refreshInterval) clearInterval(refreshInterval);
   refreshInterval = setInterval(async () => {
-    await Promise.all([loadContacts(), loadDeals()]);
+    await loadContacts();
     if (state.currentView === 'dashboard') showView('dashboard');
     updateBadges();
   }, 60000);
@@ -1141,228 +983,11 @@ function startAutoRefresh() {
 async function manualRefresh() {
   const btn = document.getElementById('refresh-btn');
   if (btn) { btn.textContent = '⟳ Refreshing...'; btn.disabled = true; }
-  await Promise.all([loadContacts(), loadDeals()]);
+  await loadContacts();
   if (state.currentView === 'dashboard') showView('dashboard');
   updateBadges();
   if (btn) { btn.textContent = '⟳ Refresh'; btn.disabled = false; }
   toast('Data refreshed ✓', 'success');
-}
-
-// ─── PRIORITY VIEW SESSION STATE ──────────────────────────────────────────────
-const skipState = {
-  nevercalled: new Set(),
-  roerisklist: new Set(),
-  followuplist: new Set(),
-  dnrlist: new Set(),
-};
-
-async function renderPriorityView(viewKey, title, panelKey) {
-  const now = Date.now();
-  const days14 = new Date(now - 14 * 86400000).toISOString();
-  const days3 = new Date(now - 3 * 86400000).toISOString();
-
-  const filterMap = {
-    nevercalled: [{
-      filters: [
-        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-        { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
-      ]
-    }, {
-      filters: [
-        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-        { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY' },
-      ]
-    }],
-    roerisklist: [{
-      filters: [
-        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-        { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
-        { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days14 },
-      ]
-    }, {
-      filters: [
-        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-        { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' },
-        { propertyName: 'hubspot_owner_assigneddate', operator: 'LT', value: days3 },
-        { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] },
-      ]
-    }],
-    followuplist: [{
-      filters: [
-        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-        { propertyName: 'subscription_status', operator: 'IN', values: ['Demo Set', 'Demo Completed', 'Contract Sent', 'Contract Revision'] },
-        { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days3 },
-        { propertyName: 'notes_next_activity_date', operator: 'NOT_HAS_PROPERTY' },
-      ]
-    }],
-    dnrlist: [{
-      filters: [
-        { propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId },
-        { propertyName: 'dnr', operator: 'EQ', value: 'Yes' },
-      ]
-    }],
-  };
-
-  document.getElementById('main').innerHTML = `
-    <div class="topbar">
-      <div class="topbar-left">
-        <h2>${title}</h2>
-        <p id="priority-count">Loading...</p>
-      </div>
-      <div class="topbar-right">
-        <button class="btn" onclick="showView('dashboard')">← Dashboard</button>
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me call scripts for my ${title} companies')">✨ AI scripts</button>
-      </div>
-    </div>
-    <div class="content">
-      <div class="ai-insight" style="margin-bottom:4px">
-        <div class="ai-insight-body" style="font-size:12px">
-          ☑️ Check a company to include it in your dialer session · Uncheck to skip it · Skips reset when you leave this view
-        </div>
-      </div>
-      <div id="priority-list" class="lead-list">
-        <div class="loading-state"><span class="spinner"></span> Loading...</div>
-      </div>
-    </div>`;
-
-  try {
-    const data = await hsPost('/crm/v3/objects/companies/search', {
-      filterGroups: filterMap[viewKey],
-      properties: ['name', 'phone', 'city', 'state', 'hubspot_owner_id', 'hs_last_logged_call_date', 'subscription_status', 'dnr', 'notes_last_contacted'],
-      sorts: [{ propertyName: 'hs_last_logged_call_date', direction: 'ASCENDING' }],
-      limit: 100,
-    });
-
-    const results = data.results || [];
-    
-    // Batch fetch contact phone numbers
-    if (results.length > 0) {
-      try {
-        // Step 1: Get contact associations for all companies
-        const assocRes = await fetch('/api/hubspot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v4/associations/companies/contacts/batch/read', 'X-HubSpot-Method': 'POST' },
-          body: JSON.stringify({ inputs: results.map(r => ({ id: r.id })) }),
-        });
-        const assocData = await assocRes.json();
-        
-        // Build map of companyId -> first contactId
-        const contactMap = {};
-        if (assocData.results) {
-          assocData.results.forEach(r => {
-            if (r.to?.length) contactMap[r.from.id] = r.to[0].toObjectId;
-          });
-        }
-
-        // Step 2: Batch fetch contact phone numbers
-        const contactIds = [...new Set(Object.values(contactMap))];
-        if (contactIds.length > 0) {
-          const contactRes = await fetch('/api/hubspot', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/contacts/batch/read', 'X-HubSpot-Method': 'POST' },
-            body: JSON.stringify({ 
-              inputs: contactIds.map(id => ({ id })),
-              properties: ['phone', 'mobilephone', 'firstname', 'lastname']
-            }),
-          });
-          const contactData = await contactRes.json();
-          
-          // Build contactId -> phone map
-          const phoneMap = {};
-          if (contactData.results) {
-            contactData.results.forEach(c => {
-              phoneMap[c.id] = c.properties.mobilephone || c.properties.phone || null;
-            });
-          }
-
-          // Merge phone numbers into results — prefer contact phone over company phone
-          results.forEach(r => {
-            const contactId = contactMap[r.id];
-            if (contactId && phoneMap[contactId]) {
-              r.properties.contactPhone = phoneMap[contactId];
-            }
-          });
-        }
-      } catch(e) {
-        console.error('Failed to fetch contact phones:', e);
-      }
-    }
-
-    priorityResults[viewKey] = results;
-    
-    const countEl = document.getElementById('priority-count');
-    if (countEl) countEl.textContent = `${results.length} companies`;
-
-    // Update sidebar badge
-    const badgeMap = { nevercalled: 'badge-nevercalled', roerisklist: 'badge-roe', followuplist: 'badge-followup', dnrlist: 'badge-dnr' };
-    const badge = document.getElementById(badgeMap[viewKey]);
-    if (badge) badge.textContent = results.length;
-
-    renderPriorityList(viewKey, results);
-  } catch(e) {
-    const list = document.getElementById('priority-list');
-    if (list) list.innerHTML = '<div class="empty-state">Failed to load</div>';
-  }
-}
-
-function renderPriorityList(viewKey, results) {
-  const list = document.getElementById('priority-list');
-  if (!list) return;
-
-  if (!results.length) {
-    list.innerHTML = '<div class="empty-state">🎉 Nothing here!</div>';
-    return;
-  }
-
-  const skipped = skipState[viewKey];
-
-  list.innerHTML = results.map(raw => {
-    const p = raw.properties;
-    const name = p.name || 'Unknown';
-    const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
-    const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${raw.id}`;
-    const rawPhone = raw.properties.contactPhone || p.phone || '';
-    const cleanPhone = rawPhone ? rawPhone.replace(/\D/g,'') : '';
-    const lastCall = p.hs_last_logged_call_date ? new Date(p.hs_last_logged_call_date).toLocaleDateString() : 'Never';
-    const isSkipped = skipped.has(raw.id);
-    const colors = [
-      {bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},
-      {bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},
-      {bg:'rgba(245,166,35,.2)',color:'#f5a623'},
-      {bg:'rgba(240,82,82,.2)',color:'#f05252'},
-      {bg:'rgba(167,139,250,.2)',color:'#a78bfa'},
-    ];
-    const ac = colors[parseInt(raw.id,10) % colors.length];
-
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'};transition:opacity .15s">
-      <input type="checkbox" ${isSkipped ? '' : 'checked'} 
-        onchange="toggleSkip('${viewKey}','${raw.id}',this.checked)" 
-        style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--blue)" />
-      <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
-          ${isSkipped ? '🚫 ' : ''}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</span>
-          <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;flex-shrink:0">HS ↗</a>
-        </div>
-      <div style="flex-shrink:0;min-width:140px;text-align:right">
-        ${isSkipped 
-          ? '<span style="color:var(--text3);font-size:12px">Skipped</span>'
-          : rawPhone 
-            ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${rawPhone}</a>`
-            : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
-      </div>
-    </div>`;
-  }).join('');
-}
-const priorityResults = {};
-
-function toggleSkip(viewKey, companyId, isChecked) {
-  if (isChecked) {
-    skipState[viewKey].delete(companyId);
-  } else {
-    skipState[viewKey].add(companyId);
-  }
-  renderPriorityList(viewKey, priorityResults[viewKey] || []);
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
