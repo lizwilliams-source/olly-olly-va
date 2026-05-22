@@ -8,7 +8,85 @@ const state = {
   selectedContact: null,
   hsConnected: false,
   chatHistory: [],
+  user: null,
+  ownerId: null,
 };
+
+// ─── CLERK AUTH ───────────────────────────────────────────────────────────────
+let clerk;
+
+async function initClerk() {
+  clerk = new Clerk(document.querySelector('script[src*="clerk"]') ? getClerkKey() : '');
+
+  // Get publishable key from meta or env
+  const publishableKey = window.__CLERK_PUBLISHABLE_KEY__;
+  if (!publishableKey) {
+    console.error('No Clerk publishable key found');
+    return;
+  }
+
+  clerk = new Clerk(publishableKey);
+  await clerk.load();
+
+  if (clerk.user) {
+    await onSignedIn();
+  } else {
+    showLoginScreen();
+    clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
+      afterSignInUrl: window.location.href,
+    });
+    clerk.addListener(({ user }) => {
+      if (user) onSignedIn();
+    });
+  }
+}
+
+async function onSignedIn() {
+  const user = clerk.user;
+  const email = user.primaryEmailAddress?.emailAddress;
+  const name = user.firstName || email;
+
+  state.user = { email, name };
+
+  // Show app
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'grid';
+  document.getElementById('user-info').textContent = `👤 ${name}`;
+
+  // Get HubSpot owner ID
+  try {
+    const token = await clerk.session.getToken();
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    });
+    const data = await res.json();
+    state.ownerId = data.ownerId;
+    console.log('Owner ID:', state.ownerId);
+  } catch (e) {
+    console.error('Failed to get owner ID:', e);
+  }
+
+  // Init app
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => showView(item.dataset.view));
+  });
+  document.getElementById('modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('modal')) closeModal();
+  });
+
+  await init();
+}
+
+function showLoginScreen() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
+}
+
+async function signOut() {
+  await clerk.signOut();
+  showLoginScreen();
+}
 
 // ─── HubSpot API ──────────────────────────────────────────────────────────────
 async function hsGet(path) {
@@ -39,18 +117,23 @@ async function hsPatch(path, body) {
 // ─── LOAD DATA ────────────────────────────────────────────────────────────────
 async function loadContacts() {
   try {
-    const data = await hsPost('/crm/v3/objects/contacts/search', {
-      filterGroups: [],
+    const filterGroups = state.ownerId ? [{
+      filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }]
+    }] : [];
+
+    const data = await hsPost('/crm/v3/objects/companies/search', {
+      filterGroups,
       properties: [
-        'firstname', 'lastname', 'email', 'phone', 'company',
-        'hs_lead_status', 'hubspot_owner_id', 'notes_last_contacted',
+        'name', 'phone', 'city', 'state', 'website',
+        'hubspot_owner_id', 'notes_last_contacted',
         'num_contacted_notes', 'hs_last_sales_activity_timestamp',
-        'lifecyclestage', 'hs_sales_email_last_replied', 'jobtitle',
-        'hs_email_last_open_date', 'createdate', 'lastmodifieddate'
+        'lifecyclestage', 'hs_lead_status', 'createdate', 'lastmodifieddate',
+        'annualrevenue', 'numberofemployees', 'industry'
       ],
       sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }],
       limit: 100,
     });
+
     if (data.results) {
       state.contacts = data.results.map(enrichContact);
       state.hsConnected = true;
@@ -58,15 +141,19 @@ async function loadContacts() {
       updateBadges();
     }
   } catch (e) {
-    console.error('Failed to load contacts:', e);
+    console.error('Failed to load companies:', e);
     updateHsStatus(false);
   }
 }
 
 async function loadDeals() {
   try {
+    const filterGroups = state.ownerId ? [{
+      filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }]
+    }] : [];
+
     const data = await hsPost('/crm/v3/objects/deals/search', {
-      filterGroups: [],
+      filterGroups,
       properties: ['dealname', 'amount', 'dealstage', 'closedate', 'hubspot_owner_id', 'hs_lastmodifieddate'],
       sorts: [{ propertyName: 'hs_lastmodifieddate', direction: 'DESCENDING' }],
       limit: 50,
@@ -83,21 +170,24 @@ function enrichContact(raw) {
   const daysSince = lastContactedMs ? Math.floor((Date.now() - lastContactedMs) / 86400000) : 999;
   const score = calcScore(p, daysSince);
   const urgency = score >= 80 ? 'urgent' : score >= 60 ? 'warm' : score >= 40 ? 'cool' : 'new';
+  const name = p.name || 'Unknown Company';
+  const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   return {
     id: raw.id,
-    name: `${p.firstname || ''} ${p.lastname || ''}`.trim() || 'Unknown',
-    email: p.email || '',
+    name,
     phone: p.phone || '',
-    company: p.company || '',
-    title: p.jobtitle || '',
+    city: p.city || '',
+    state: p.state || '',
+    website: p.website || '',
+    industry: p.industry || '',
     stage: p.lifecyclestage || p.hs_lead_status || 'lead',
     ownerId: p.hubspot_owner_id || '',
     daysSince,
     lastContacted: lastContactedMs ? new Date(lastContactedMs).toLocaleDateString() : 'Never',
     score,
     urgency,
-    initials: ((p.firstname || '?')[0] + (p.lastname || '?')[0]).toUpperCase(),
+    initials,
     avatarColor: avatarColor(raw.id),
     needsCall: daysSince > 7 || !lastContactedMs,
     createdAt: p.createdate,
@@ -147,29 +237,29 @@ function updateBadges() {
 // ─── AI ───────────────────────────────────────────────────────────────────────
 async function askAI(userMsg, extraContext = '') {
   const contactSummary = state.contacts.slice(0, 20).map(c =>
-    `${c.name} (${c.company}, score ${c.score}, last contact: ${c.lastContacted}, stage: ${c.stage})`
+    `${c.name} (score ${c.score}, last contact: ${c.lastContacted}, stage: ${c.stage}, location: ${c.city} ${c.state})`
   ).join('\n');
 
-  const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. Your job is to help the sales team manage leads, draft emails, coach on calls, prioritize their day, and give sharp, actionable advice.
+  const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies and leads.
 
-Current contacts (top 20):
+Their current companies (top 20):
 ${contactSummary}
 
 ${extraContext}
 
-Be concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling. Use actual names and details from the contacts list.`;
+Be concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling. Use actual company names and details.`;
 
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
 
   const res = await fetch('/api/ai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system, messages }),
+    body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 1000, system, messages }),
   });
 
   if (!res.ok) throw new Error(`AI API error: ${res.status}`);
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message || 'AI error');
+  if (data.error) throw new Error(JSON.stringify(data.error));
   const reply = data.content?.map(b => b.text || '').join('') || 'Sorry, something went wrong.';
   state.chatHistory.push({ role: 'user', content: userMsg });
   state.chatHistory.push({ role: 'assistant', content: reply });
@@ -206,8 +296,8 @@ async function renderDashboard() {
   document.getElementById('main').innerHTML = `
     <div class="topbar">
       <div class="topbar-left">
-        <h2>Good morning 👋</h2>
-        <p>${new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })} · ${callNeeded} contacts need a call today</p>
+        <h2>Good morning, ${state.user?.name || ''} 👋</h2>
+        <p>${new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })} · ${callNeeded} companies need a call today</p>
       </div>
       <div class="topbar-right">
         <button class="btn" onclick="showView('callqueue')">📞 Call Queue</button>
@@ -216,7 +306,7 @@ async function renderDashboard() {
     </div>
     <div class="content">
       <div class="metrics-grid">
-        <div class="metric-card blue"><div class="metric-label">Total Contacts</div><div class="metric-value">${state.contacts.length}</div><div class="metric-sub">Synced from HubSpot</div></div>
+        <div class="metric-card blue"><div class="metric-label">My Companies</div><div class="metric-value">${state.contacts.length}</div><div class="metric-sub">Assigned to me</div></div>
         <div class="metric-card red"><div class="metric-label">Calls Needed</div><div class="metric-value">${callNeeded}</div><div class="metric-sub">Haven't called in 7+ days</div></div>
         <div class="metric-card amber"><div class="metric-label">Follow-ups Due</div><div class="metric-value">${followNeeded}</div><div class="metric-sub">5+ days since contact</div></div>
         <div class="metric-card green"><div class="metric-label">Hot Leads</div><div class="metric-value">${hot}</div><div class="metric-sub">Score 80+</div></div>
@@ -224,11 +314,11 @@ async function renderDashboard() {
 
       <div id="ai-daily-insight" class="ai-insight">
         <div class="ai-insight-header"><div class="ai-insight-icon">✨</div><div class="ai-insight-title">AI Daily Briefing</div></div>
-        <div class="ai-insight-body"><span class="spinner"></span> Analyzing your leads...</div>
+        <div class="ai-insight-body"><span class="spinner"></span> Analyzing your companies...</div>
       </div>
 
       <div>
-        <div class="section-header"><span class="section-title">🔥 Top Priority Leads</span><span class="section-link" onclick="showView('contacts')">See all →</span></div>
+        <div class="section-header"><span class="section-title">🔥 Top Priority Companies</span><span class="section-link" onclick="showView('contacts')">See all →</span></div>
         <div class="lead-list" style="margin-top:8px">${top3.map(leadCardHTML).join('')}</div>
       </div>
 
@@ -240,12 +330,12 @@ async function renderDashboard() {
 
   try {
     const insight = await askAI(
-      `Give me a sharp 2-sentence morning briefing: who are my top 3 contacts to prioritize today and why? Be specific with names.`,
+      `Give me a sharp 2-sentence morning briefing: which of my companies should I prioritize today and why? Be specific with names.`,
       `Today's date: ${new Date().toLocaleDateString()}`
     );
     document.querySelector('#ai-daily-insight .ai-insight-body').innerHTML = insight.replace(/\n/g,'<br>') +
       `<div class="ai-chips">
-        <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority contacts today')">Draft top 3 emails ↗</div>
+        <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
         <div class="ai-chip" onclick="showView('callqueue')">Open call queue</div>
         <div class="ai-chip" onclick="openAIWithPrompt('Give me a coaching tip for my hardest objection today')">Get coaching tip ↗</div>
       </div>`;
@@ -262,15 +352,15 @@ function renderCallQueue() {
 
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>📞 Call Queue</h2><p>${toCall.length} contacts need a call · Sorted by priority score</p></div>
+      <div class="topbar-left"><h2>📞 Call Queue</h2><p>${toCall.length} companies need a call · Sorted by priority score</p></div>
       <div class="topbar-right">
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me a call script for my top priority contact today. Include an opener, key questions, and how to handle if they say they are busy.')">✨ Get call script</button>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me a call script for my top priority company today. Include an opener, key questions, and how to handle if they say they are busy.')">✨ Get call script</button>
       </div>
     </div>
     <div class="content">
       <div class="ai-insight">
         <div class="ai-insight-header"><div class="ai-insight-icon">💡</div><div class="ai-insight-title">Smart Dialing Order</div></div>
-        <div class="ai-insight-body">Contacts are sorted by AI priority score. Call top scores first. Phone numbers are clickable — if you have the Aloware Chrome extension, it will intercept the call automatically. Contacts with no call history are flagged 🆕.</div>
+        <div class="ai-insight-body">Companies sorted by AI priority score. Call top scores first. Phone numbers are clickable — Aloware will intercept automatically. Companies with no call history are flagged 🆕.</div>
       </div>
       ${toCall.length === 0
         ? '<div class="empty-state">🎉 No calls needed right now!</div>'
@@ -280,7 +370,7 @@ function renderCallQueue() {
 
 function callQueueItemHTML(c) {
   const priority = c.score >= 80 ? 1 : c.score >= 60 ? 2 : 3;
-  const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+  const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
   const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
   const phoneDisplay = c.phone
     ? `<a href="tel:${cleanPhone}" onclick="event.stopPropagation()" style="color:var(--green);text-decoration:none;font-weight:600" title="Click to call via Aloware">📞 ${c.phone}</a>`
@@ -290,10 +380,10 @@ function callQueueItemHTML(c) {
     <div style="min-width:0;flex:1">
       <div class="lead-name" style="display:flex;align-items:center;gap:8px">
         ${c.name} ${c.daysSince === 999 ? '🆕' : ''}
-        <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px" title="Open in HubSpot">HS ↗</a>
+        <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
       </div>
       <div class="lead-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:3px">
-        <span>${c.company || 'No company'}</span>
+        <span>${c.city ? `${c.city}, ${c.state}` : c.state || 'No location'}</span>
         <span>·</span>
         ${phoneDisplay}
         <span>·</span>
@@ -302,7 +392,7 @@ function callQueueItemHTML(c) {
     </div>
     <div class="call-actions">
       <button class="btn btn-sm btn-call" onclick="event.stopPropagation();logCall('${c.id}')">✅ Log call</button>
-      <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Write a call script for ${c.name} at ${c.company}. Stage: ${c.stage}. Include opener, discovery questions, and objection handling.')">✨ Script</button>
+      <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Write a call script for ${c.name}. Stage: ${c.stage}. Include opener, discovery questions, and objection handling.')">✨ Script</button>
     </div>
   </div>`;
 }
@@ -315,15 +405,15 @@ function renderFollowups() {
 
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🔔 Follow-ups</h2><p>${due.length} contacts need a follow-up</p></div>
+      <div class="topbar-left"><h2>🔔 Follow-ups</h2><p>${due.length} companies need a follow-up</p></div>
       <div class="topbar-right">
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Draft follow-up emails for my top 5 contacts who need outreach. Make each one personalized and specific.')">✨ Draft all emails</button>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Draft follow-up emails for my top 5 companies that need outreach. Make each one personalized and specific.')">✨ Draft all emails</button>
       </div>
     </div>
     <div class="content">
       ${due.length === 0 ? '<div class="empty-state">🎉 All caught up!</div>' :
         '<div class="lead-list">' + due.map(c => {
-          const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+          const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
           return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
             <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
             <div>
@@ -331,25 +421,25 @@ function renderFollowups() {
                 ${c.name}
                 <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
               </div>
-              <div class="lead-meta">${c.company || 'No company'} · ${c.daysSince === 999 ? 'Never contacted' : `${c.daysSince} days since contact`}</div>
+              <div class="lead-meta">${c.city ? `${c.city}, ${c.state}` : 'No location'} · ${c.daysSince === 999 ? 'Never contacted' : `${c.daysSince} days since contact`}</div>
             </div>
             <div class="lead-right">
               <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
-              <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Draft a follow-up email to ${c.name} at ${c.company}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Make it warm and specific.')">✨ Draft email</button>
+              <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Make it warm and specific.')">✨ Draft email</button>
             </div>
           </div>`;
         }).join('') + '</div>'}
     </div>`;
 }
 
-// ── CONTACTS ──────────────────────────────────────────────────────────────────
+// ── COMPANIES ─────────────────────────────────────────────────────────────────
 function renderContacts() {
   const sorted = [...state.contacts].sort((a, b) => b.score - a.score);
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>👥 All Contacts</h2><p>${sorted.length} contacts synced from HubSpot</p></div>
+      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${sorted.length} companies assigned to you</p></div>
       <div class="topbar-right">
-        <input id="contact-search" placeholder="Search contacts..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:200px" oninput="filterContacts(this.value)" />
+        <input id="contact-search" placeholder="Search companies..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:200px" oninput="filterContacts(this.value)" />
       </div>
     </div>
     <div class="content">
@@ -361,14 +451,14 @@ function filterContacts(q) {
   const list = document.getElementById('contact-list');
   const filtered = state.contacts.filter(c =>
     c.name.toLowerCase().includes(q.toLowerCase()) ||
-    (c.company || '').toLowerCase().includes(q.toLowerCase()) ||
-    (c.email || '').toLowerCase().includes(q.toLowerCase())
+    (c.city || '').toLowerCase().includes(q.toLowerCase()) ||
+    (c.industry || '').toLowerCase().includes(q.toLowerCase())
   );
-  list.innerHTML = filtered.length ? filtered.map(leadCardHTML).join('') : '<div class="empty-state">No contacts found</div>';
+  list.innerHTML = filtered.length ? filtered.map(leadCardHTML).join('') : '<div class="empty-state">No companies found</div>';
 }
 
 function leadCardHTML(c) {
-  const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+  const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
   return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
     <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
     <div>
@@ -376,7 +466,7 @@ function leadCardHTML(c) {
         ${c.name}
         <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
       </div>
-      <div class="lead-meta">${c.company || 'No company'} · ${c.daysSince === 999 ? 'Never contacted' : `Last contact: ${c.lastContacted}`}</div>
+      <div class="lead-meta">${c.city ? `${c.city}, ${c.state}` : 'No location'} · ${c.daysSince === 999 ? 'Never contacted' : `Last contact: ${c.lastContacted}`}</div>
     </div>
     <div class="lead-right">
       <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
@@ -405,13 +495,13 @@ function renderPipeline() {
       <div class="pipeline-cards">
         ${s.contacts.length === 0 ? '<div style="font-size:11px;color:var(--text3);padding:8px 0">None</div>' :
           s.contacts.map(c => {
-            const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+            const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
             return `<div class="pipeline-card" onclick="openContact('${c.id}')">
               <div class="pipeline-card-name" style="display:flex;align-items:center;gap:6px">
                 ${c.name}
                 <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:9px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 5px;border-radius:4px">HS ↗</a>
               </div>
-              <div class="pipeline-card-company">${c.company || 'No company'}</div>
+              <div class="pipeline-card-company">${c.city ? `${c.city}, ${c.state}` : c.industry || 'No location'}</div>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
                 <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}" style="font-size:9px">${c.score}</span>
                 <span style="font-size:10px;color:var(--text3)">${c.daysSince === 999 ? 'Never called' : `${c.daysSince}d ago`}</span>
@@ -422,9 +512,9 @@ function renderPipeline() {
     </div>`).join('');
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>📊 Pipeline</h2><p>${state.contacts.length} contacts across stages</p></div>
+      <div class="topbar-left"><h2>📊 Pipeline</h2><p>${state.contacts.length} companies across stages</p></div>
       <div class="topbar-right">
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Analyze my pipeline and tell me which contacts are most likely to close this month and what I should do with each.')">✨ Analyze pipeline</button>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Analyze my pipeline and tell me which companies are most likely to close this month and what I should do with each.')">✨ Analyze pipeline</button>
       </div>
     </div>
     <div class="content">
@@ -436,19 +526,19 @@ function renderPipeline() {
 function renderAI() {
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>✨ AI Assistant</h2><p>Ask anything about your leads, get emails drafted, coaching, and more</p></div>
+      <div class="topbar-left"><h2>✨ AI Assistant</h2><p>Ask anything about your companies, get emails drafted, coaching, and more</p></div>
     </div>
     <div class="chat-wrap">
       <div class="chat-messages" id="chat-messages">
         <div class="msg ai">
           <div class="msg-label">Assistant</div>
-          <div class="msg-bubble">Hi! I'm connected to your HubSpot contacts and ready to help. I can draft follow-up emails, help you prioritize your day, write call scripts, analyze your pipeline, or coach you through tough conversations. What do you need?</div>
+          <div class="msg-bubble">Hi ${state.user?.name || 'there'}! I'm connected to your HubSpot companies and ready to help. I can draft follow-up emails, help you prioritize your day, write call scripts, analyze your pipeline, or coach you through tough conversations. What do you need?</div>
         </div>
         <div class="ai-chips" style="padding:0 0 8px">
-          <div class="ai-chip" onclick="sendPreset('Who are my top 3 leads to focus on today and why?')">Today's priorities ↗</div>
-          <div class="ai-chip" onclick="sendPreset('Draft follow-up emails for my top 5 contacts who need outreach')">Draft follow-ups ↗</div>
+          <div class="ai-chip" onclick="sendPreset('Who are my top 3 companies to focus on today and why?')">Today's priorities ↗</div>
+          <div class="ai-chip" onclick="sendPreset('Draft follow-up emails for my top 5 companies that need outreach')">Draft follow-ups ↗</div>
           <div class="ai-chip" onclick="sendPreset('Give me a cold call script for a new lead in the discovery stage')">Call script ↗</div>
-          <div class="ai-chip" onclick="sendPreset('Analyze my pipeline and tell me what deals are at risk')">Pipeline analysis ↗</div>
+          <div class="ai-chip" onclick="sendPreset('Analyze my pipeline and tell me what is at risk')">Pipeline analysis ↗</div>
           <div class="ai-chip" onclick="sendPreset('Give me tips for handling the objection: we do not have budget right now')">Handle objection ↗</div>
         </div>
         ${state.chatHistory.map(m => `
@@ -458,7 +548,7 @@ function renderAI() {
           </div>`).join('')}
       </div>
       <div class="chat-input-area">
-        <input id="chat-input" placeholder="Ask about a lead, request a draft, get coaching..." onkeydown="if(event.key==='Enter')sendChat()" />
+        <input id="chat-input" placeholder="Ask about a company, request a draft, get coaching..." onkeydown="if(event.key==='Enter')sendChat()" />
         <button class="btn btn-primary" onclick="sendChat()">Send →</button>
       </div>
     </div>`;
@@ -477,7 +567,7 @@ async function sendChat() {
     document.getElementById(loadId).outerHTML = `
       <div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble">${reply.replace(/\n/g, '<br>')}</div></div>`;
   } catch(e) {
-    document.getElementById(loadId).outerHTML = `<div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble" style="color:var(--red)">Error: ${e.message}. Check your Anthropic API key in Vercel environment variables.</div></div>`;
+    document.getElementById(loadId).outerHTML = `<div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble" style="color:var(--red)">Error: ${e.message}</div></div>`;
   }
   scrollChat();
 }
@@ -541,19 +631,21 @@ async function openContact(id) {
   if (!c) return;
   state.selectedContact = c;
   const notes = state.notes[id] || [];
-  const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+  const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
   const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
 
   document.getElementById('modal-title').innerHTML = `${c.name} <a href="${hsUrl}" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:none;font-weight:400">Open in HubSpot ↗</a>`;
   document.getElementById('modal-body').innerHTML = `
     <div class="field-row">
-      <div><div class="field-label">Company</div><div class="field-value">${c.company || '—'}</div></div>
-      <div><div class="field-label">Title</div><div class="field-value">${c.title || '—'}</div></div>
+      <div><div class="field-label">Location</div><div class="field-value">${c.city ? `${c.city}, ${c.state}` : '—'}</div></div>
+      <div><div class="field-label">Industry</div><div class="field-value">${c.industry || '—'}</div></div>
     </div>
     <div class="field-row">
-      <div><div class="field-label">Email</div><div class="field-value" style="color:var(--blue)">${c.email || '—'}</div></div>
       <div><div class="field-label">Phone</div><div class="field-value">
         ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:600">📞 ${c.phone}</a>` : '—'}
+      </div></div>
+      <div><div class="field-label">Website</div><div class="field-value">
+        ${c.website ? `<a href="${c.website}" target="_blank" style="color:var(--blue);text-decoration:none">${c.website}</a>` : '—'}
       </div></div>
     </div>
     <div class="field-row">
@@ -580,8 +672,8 @@ async function openContact(id) {
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
     <button class="btn btn-sm" onclick="logCall('${id}')">✅ Log call</button>
-    <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name} at ${c.company}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
-    <button class="btn btn-primary btn-sm" onclick="openAIWithPrompt('Give me a call script for ${c.name} at ${c.company}. Stage: ${c.stage}. Include opener, key questions, and objection handling.')">📞 Call script</button>`;
+    <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
+    <button class="btn btn-primary btn-sm" onclick="openAIWithPrompt('Give me a call script for ${c.name}. Stage: ${c.stage}. Include opener, key questions, and objection handling.')">📞 Call script</button>`;
 
   document.getElementById('modal').style.display = 'flex';
 }
@@ -593,7 +685,7 @@ async function saveNote(contactId) {
   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: text, hs_timestamp: Date.now() },
-      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }] }],
+      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
     });
     toast('Note saved to HubSpot ✓', 'success');
   } catch {
@@ -619,7 +711,7 @@ async function logCall(contactId) {
         hs_call_status: 'COMPLETED',
         hs_call_duration: 0,
       },
-      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 194 }] }],
+      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 182 }] }],
     });
     toast(`Call logged for ${c.name} ✓`, 'success');
     const contact = state.contacts.find(x => x.id === contactId);
@@ -648,14 +740,6 @@ function toast(msg, type = '') {
   setTimeout(() => el.remove(), 3500);
 }
 
-// ─── NAV & MODAL ──────────────────────────────────────────────────────────────
-document.querySelectorAll('.nav-item').forEach(item => {
-  item.addEventListener('click', () => showView(item.dataset.view));
-});
-document.getElementById('modal').addEventListener('click', e => {
-  if (e.target === document.getElementById('modal')) closeModal();
-});
-
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 async function init() {
   showView('dashboard');
@@ -663,4 +747,14 @@ async function init() {
   if (state.currentView === 'dashboard') showView('dashboard');
 }
 
-init();
+// ─── CLERK INIT ───────────────────────────────────────────────────────────────
+(async () => {
+  const publishableKey = await fetch('/api/clerk-key').then(r => r.json()).then(d => d.key).catch(() => null);
+  if (!publishableKey) {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('login-screen').innerHTML = '<div style="color:white;padding:40px">Missing Clerk publishable key — add CLERK_PUBLISHABLE_KEY to Vercel env variables.</div>';
+    return;
+  }
+  window.__CLERK_PUBLISHABLE_KEY__ = publishableKey;
+  await initClerk();
+})();
