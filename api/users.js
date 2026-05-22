@@ -67,7 +67,7 @@ export default async function handler(req, res) {
     if (user.passwordHash !== hashPassword(password)) return res.status(401).json({ error: 'Invalid email or password' });
 
     const token = generateToken();
-    await kvSet(`session:${token}`, { email: user.email, name: user.name, ownerId: user.ownerId, createdAt: Date.now() });
+    await kvSet(`session:${token}`, { email: user.email, name: user.name, ownerId: user.ownerId, isAdmin: user.isAdmin || false, createdAt: Date.now() });
 
     return res.status(200).json({ token, name: user.name, email: user.email, ownerId: user.ownerId });
   }
