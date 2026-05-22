@@ -62,9 +62,6 @@ export default async function handler(req, res) {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-    const existing = await kvGet(`user:${email.toLowerCase()}`);
-    if (existing) return res.status(400).json({ error: 'User already exists' });
-
     const user = await kvGet(`user:${email.toLowerCase()}`);
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
     if (user.passwordHash !== hashPassword(password)) return res.status(401).json({ error: 'Invalid email or password' });
@@ -112,6 +109,9 @@ export default async function handler(req, res) {
 
     const { email, name, password, isAdmin } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+    const existing = await kvGet(`user:${email.toLowerCase()}`);
+    if (existing) return res.status(400).json({ error: 'User already exists' });
 
     // Auto-lookup HubSpot owner ID
     const hsParams = new URLSearchParams();
