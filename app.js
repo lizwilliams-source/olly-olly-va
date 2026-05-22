@@ -717,10 +717,11 @@ async function bulkAddUsers() {
         body: JSON.stringify({ name, email, password, isAdmin: false }),
       });
       const data = await res.json();
-      if (data.ok) {
+      if (res.ok && data.ok) {
         results.push(`✓ ${name} — ${email}${data.ownerId ? '' : ' (no HubSpot match)'}`);
       } else {
-        results.push(`✗ ${name} — ${data.error}`);
+        results.push(`✗ ${name} — ${data.error || 'Failed'}`);
+      }
       }
     } catch {
       results.push(`✗ ${name} — failed`);
