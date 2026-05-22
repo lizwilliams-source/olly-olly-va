@@ -65,9 +65,82 @@ async function checkSession() {
     state.user = { email: data.email, name: data.name };
     state.ownerId = data.ownerId;
     state.isAdmin = data.isAdmin;
-    showApp();
+
+    if (!state.ownerId) {
+      showOwnerSetup();
+    } else {
+      showApp();
+    }
   } catch (e) {
     showLogin();
+  }
+}
+
+function showOwnerSetup() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('owner-setup-screen').style.display = 'flex';
+}
+
+async function saveOwnerFromUrl() {
+  const url = document.getElementById('hs-url-input').value.trim();
+  const errorEl = document.getElementById('owner-setup-error');
+  errorEl.style.display = 'none';
+
+  // Parse contact or company ID from URL
+  const contactMatch = url.match(/\/contact\/(\d+)/);
+  const companyMatch = url.match(/\/company\/(\d+)/);
+  const recordId = contactMatch?.[1] || companyMatch?.[1];
+  const isCompany = !!companyMatch;
+
+  if (!recordId) {
+    errorEl.textContent = 'Could not find a contact or company ID in that URL. Try copying the full URL from your browser.';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('owner-setup-btn');
+  btn.textContent = 'Looking up...';
+  btn.disabled = true;
+
+  try {
+    const path = isCompany
+      ? `/crm/v3/objects/companies/${recordId}?properties=hubspot_owner_id`
+      : `/crm/v3/objects/contacts/${recordId}?properties=hubspot_owner_id`;
+
+    const res = await fetch('/api/hubspot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': path, 'X-HubSpot-Method': 'GET' },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    const ownerId = data.properties?.hubspot_owner_id;
+
+    if (!ownerId) {
+      errorEl.textContent = 'That record doesn\'t have an owner assigned. Try a different contact or company that\'s assigned to you.';
+      errorEl.style.display = 'block';
+      btn.textContent = 'Set up my account';
+      btn.disabled = false;
+      return;
+    }
+
+    // Save owner ID to user profile
+    const saveRes = await fetch('/api/users?action=setowner', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ ownerId }),
+    });
+    const saveData = await saveRes.json();
+    if (!saveData.ok) throw new Error(saveData.error || 'Failed to save');
+
+    state.ownerId = ownerId;
+    document.getElementById('owner-setup-screen').style.display = 'none';
+    showApp();
+  } catch (e) {
+    errorEl.textContent = 'Something went wrong: ' + e.message;
+    errorEl.style.display = 'block';
+    btn.textContent = 'Set up my account';
+    btn.disabled = false;
   }
 }
 
