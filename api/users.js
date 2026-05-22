@@ -69,7 +69,7 @@ export default async function handler(req, res) {
     const token = generateToken();
     await kvSet(`session:${token}`, { email: user.email, name: user.name, ownerId: user.ownerId, isAdmin: user.isAdmin || false, createdAt: Date.now() });
 
-    return res.status(200).json({ token, name: user.name, email: user.email, ownerId: user.ownerId });
+    return res.status(200).json({ token, name: user.name, email: user.email, ownerId: user.ownerId, isAdmin: user.isAdmin || false });
   }
 
   // ── VERIFY SESSION ─────────────────────────────────────────────────────────
