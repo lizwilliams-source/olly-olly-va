@@ -205,3 +205,12 @@ textarea::placeholder { color: var(--text3); }
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
   .pipeline-board { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Login */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+.login-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; width: 400px; }
+.login-logo { text-align: center; margin-bottom: 1.5rem; }
+.login-logo-icon { font-size: 36px; margin-bottom: 8px; }
+.login-logo h1 { font-size: 22px; font-weight: 700; color: var(--text); }
+.login-logo p { font-size: 13px; color: var(--text2); margin-top: 2px; }
+.user-info { font-size: 12px; color: var(--text2); margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
