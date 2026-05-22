@@ -16,6 +16,7 @@ const state = {
 let clerk;
 
 async function initClerk() {
+  console.log('Clerk on window:', window.Clerk, 'Keys:', Object.keys(window).filter(k => k.toLowerCase().includes('clerk')));
   const publishableKey = window.__CLERK_PUBLISHABLE_KEY__;
   if (!publishableKey) {
     console.error('No Clerk publishable key found');
