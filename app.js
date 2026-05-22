@@ -376,18 +376,45 @@ async function loadDashboardPanels() {
 // ── MY COMPANIES ──────────────────────────────────────────────────────────────
 function renderContacts() {
   const sorted = [...state.contacts].sort((a, b) => b.score - a.score);
+  const pageSize = state.contactsPageSize || 50;
+  const page = state.contactsPage || 0;
+  const paginated = sorted.slice(page * pageSize, (page + 1) * pageSize);
+  const totalPages = Math.ceil(sorted.length / pageSize);
+
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${state.contacts.length} companies assigned to you</p></div>
+      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${sorted.length} companies assigned to you</p></div>
       <div class="topbar-right">
         <input id="contact-search" placeholder="Search companies..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:200px" oninput="filterContacts(this.value)" />
+        <span style="font-size:12px;color:var(--text2);margin-left:8px">Per page:</span>
+        ${[25,50,100].map(n => `<button class="btn btn-sm ${pageSize===n?'btn-primary':''}" onclick="setContactsPageSize(${n})">${n}</button>`).join('')}
       </div>
     </div>
     <div class="content">
-      <div class="lead-list" id="contact-list">${sorted.map(leadCardHTML).join('')}</div>
+      <div style="display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Company</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Timezone</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Lead Source</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em"></div>
+      </div>
+      <div class="lead-list" id="contact-list">${paginated.map(leadCardHTML).join('')}</div>
+      ${totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:8px;margin-top:12px">
+        ${Array.from({length: totalPages}, (_, i) => `<button class="btn btn-sm ${i===page?'btn-primary':''}" onclick="setContactsPage(${i})">${i+1}</button>`).join('')}
+      </div>` : ''}
     </div>`;
 }
 
+function setContactsPageSize(size) {
+  state.contactsPageSize = size;
+  state.contactsPage = 0;
+  renderContacts();
+}
+
+function setContactsPage(page) {
+  state.contactsPage = page;
+  renderContacts();
+  document.getElementById('contact-list')?.scrollIntoView({ behavior: 'smooth' });
+}
 function filterContacts(q) {
   const list = document.getElementById('contact-list');
   const filtered = state.contacts.filter(c =>
@@ -401,22 +428,22 @@ function filterContacts(q) {
 function leadCardHTML(c) {
   const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
   const inQueue = state.queue.find(q => q.id === c.id);
-  return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
-    <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
-    <div style="flex:1;min-width:0">
-      <div class="lead-name" style="display:flex;align-items:center;gap:8px">
-        ${c.name}
-        <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
-      </div>
-      <div class="lead-meta" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px">
-        ${c.timezone ? `<span>🕐 ${c.timezone}</span>` : ''}
-        ${c.leadSource ? `<span>· 📌 ${c.leadSource}</span>` : ''}
-        ${c.masterStage ? `<span>· <span style="color:var(--amber)">${c.masterStage}</span></span>` : ''}
+  return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')" style="display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;align-items:center">
+    <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color};flex-shrink:0">${c.initials}</div>
+      <div style="min-width:0">
+        <div class="lead-name" style="display:flex;align-items:center;gap:6px">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
+          <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;flex-shrink:0">HS ↗</a>
+        </div>
+        <div style="font-size:11px;color:var(--text3)">${c.masterStage || c.stage}</div>
       </div>
     </div>
-    <div class="lead-right">
+    <div style="font-size:12px;color:var(--text2)">${c.timezone ? `🕐 ${c.timezone}` : '—'}</div>
+    <div style="font-size:12px;color:var(--text2)">${c.leadSource ? `📌 ${c.leadSource}` : '—'}</div>
+    <div class="lead-right" style="flex-direction:row;gap:6px">
       <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
-      <button class="btn btn-sm" style="${inQueue ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="event.stopPropagation();${inQueue ? `removeFromQueue('${c.id}')` : `addToQueue('${c.id}')`}">${inQueue ? '✓ In Queue' : '+ Queue'}</button>
+      <button class="btn btn-sm" style="${inQueue ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="event.stopPropagation();${inQueue ? `removeFromQueue('${c.id}')` : `addToQueue('${c.id}')`}">${inQueue ? '✓' : '+'}</button>
     </div>
   </div>`;
 }
@@ -517,8 +544,17 @@ async function renderPriorityView(viewKey, title) {
         </div>
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-size:12px;color:var(--text2)">Per page:</span>
-          ${[25,50,100].map(n => `<button class="btn btn-sm ${priorityPageSize===n?'btn-primary':''}" onclick="setPriorityPageSize('${viewKey}','${title}',${n})">${n}</button>`).join('')}
+          ${[25,50,100].map(n => `<button class="btn btn-sm per-page-btn ${priorityPageSize===n?'btn-primary':''}" data-size="${n}" onclick="setPriorityPageSize('${viewKey}','${title}',${n})">${n}</button>`).join('')}
         </div>
+      </div>
+      <div style="display:grid;grid-template-columns:auto auto 1fr 160px 160px auto auto;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
+        <div style="width:16px"></div>
+        <div style="width:48px"></div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Company</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Timezone</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Lead Source</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Phone</div>
+        <div style="width:36px"></div>
       </div>
       <div id="priority-list" class="lead-list">
         <div class="loading-state"><span class="spinner"></span> Loading...</div>
@@ -576,7 +612,7 @@ function renderPriorityPage(viewKey) {
   if (!list) return;
   if (!results.length) { list.innerHTML = '<div class="empty-state">🎉 Nothing here!</div>'; return; }
 
-  list.innerHTML = page.map(raw => {
+list.innerHTML = page.map(raw => {
     const p = raw.properties;
     const name = p.name || 'Unknown';
     const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
@@ -588,33 +624,36 @@ function renderPriorityPage(viewKey) {
     const colors = [{bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},{bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},{bg:'rgba(167,139,250,.2)',color:'#a78bfa'}];
     const ac = colors[parseInt(raw.id,10) % colors.length];
 
-    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : inQueue ? 'var(--purple)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'};transition:opacity .15s" id="prow-${raw.id}">
-      <input type="checkbox" class="queue-cb" data-id="${raw.id}" data-name="${name.replace(/"/g,'')}" ${inQueue ? 'checked' : ''}
+    return `<div style="display:grid;grid-template-columns:auto auto 1fr 160px 160px auto auto;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : inQueue ? 'var(--purple)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'}" id="prow-${raw.id}">
+      <input type="checkbox" class="queue-cb" data-id="${raw.id}" ${inQueue ? 'checked' : ''}
         onchange="handleQueueCheckbox('${viewKey}','${raw.id}',this.checked)"
         style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--purple)" />
-      <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
-          ${isSkipped ? '🚫 ' : ''}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</span>
-          <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;flex-shrink:0">HS ↗</a>
-        </div>
-        <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
-          ${p['timezone_'] ? `<span>🕐 ${p['timezone_']}</span>` : ''}
-          ${p.lead_source ? `<span>${p['timezone_'] ? '·' : ''} 📌 ${p.lead_source}</span>` : ''}
+      <button class="btn btn-sm" onclick="toggleSkip('${viewKey}','${raw.id}',${isSkipped})" style="padding:3px 8px;font-size:11px;${isSkipped ? 'color:var(--blue)' : 'color:var(--text3)'}">
+        ${isSkipped ? 'Unskip' : 'Skip'}
+      </button>
+      <div style="min-width:0;display:flex;align-items:center;gap:8px">
+        <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${initials}</div>
+        <div style="min-width:0">
+          <div style="font-size:13px;font-weight:600;color:${isSkipped ? 'var(--text3)' : 'var(--text)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px">
+            ${isSkipped ? '🚫 ' : ''}${name}
+            <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 5px;border-radius:4px;flex-shrink:0">HS ↗</a>
+          </div>
         </div>
       </div>
-      <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
-        <div style="min-width:140px;text-align:right">
-          ${isSkipped
-            ? '<span style="color:var(--text3);font-size:12px">Skipped</span>'
-            : rawPhone
-              ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${rawPhone}</a>`
-              : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
-        </div>
-        <button class="btn btn-sm" onclick="toggleSkip('${viewKey}','${raw.id}',${isSkipped})" style="${isSkipped ? 'color:var(--blue)' : 'color:var(--text2)'}">
-          ${isSkipped ? 'Unskip' : 'Skip'}
-        </button>
+      <div style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        ${p['timezone_'] ? `🕐 ${p['timezone_']}` : '<span style="color:var(--text3)">—</span>'}
       </div>
+      <div style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        ${p.lead_source ? `📌 ${p.lead_source}` : '<span style="color:var(--text3)">—</span>'}
+      </div>
+      <div style="font-size:14px;font-weight:700;white-space:nowrap">
+        ${isSkipped
+          ? '<span style="color:var(--text3);font-size:12px">Skipped</span>'
+          : rawPhone
+            ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none">📞 ${rawPhone}</a>`
+            : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
+      </div>
+      <button class="btn btn-sm" onclick="openAIWithPrompt('Write a call script for ${name.replace(/'/g,"\\'")}. Include opener, discovery questions, and objection handling.')">✨</button>
     </div>`;
   }).join('');
 
@@ -637,9 +676,12 @@ function goPriorityPage(viewKey, page) {
 function setPriorityPageSize(viewKey, title, size) {
   priorityPageSize = size;
   priorityPage = 0;
+  // Update button styles
+  document.querySelectorAll('.per-page-btn').forEach(b => {
+    b.classList.toggle('btn-primary', parseInt(b.dataset.size) === size);
+    b.classList.toggle('btn-default', parseInt(b.dataset.size) !== size);
+  });
   renderPriorityPage(viewKey);
-  // Refresh topbar buttons
-  document.querySelectorAll('.per-page-btn').forEach(b => b.classList.remove('btn-primary'));
 }
 
 function toggleSelectAll(viewKey, checked) {
