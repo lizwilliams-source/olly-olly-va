@@ -2,8 +2,8 @@
 const state = {
   contacts: [],
   deals: [],
-  notes: {},       // contactId -> array of notes
-  tasks: {},       // contactId -> array of tasks
+  notes: {},
+  tasks: {},
   currentView: 'dashboard',
   selectedContact: null,
   hsConnected: false,
@@ -152,12 +152,12 @@ async function askAI(userMsg, extraContext = '') {
 
   const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. Your job is to help the sales team manage leads, draft emails, coach on calls, prioritize their day, and give sharp, actionable advice.
 
-Her current contacts (top 20):
+Current contacts (top 20):
 ${contactSummary}
 
 ${extraContext}
 
-Be concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling. Use her contacts' actual names and details.`;
+Be concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling. Use actual names and details from the contacts list.`;
 
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
 
@@ -167,7 +167,9 @@ Be concise, friendly, and specific. When drafting emails, write the full email w
     body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system, messages }),
   });
 
+  if (!res.ok) throw new Error(`AI API error: ${res.status}`);
   const data = await res.json();
+  if (data.error) throw new Error(data.error.message || 'AI error');
   const reply = data.content?.map(b => b.text || '').join('') || 'Sorry, something went wrong.';
   state.chatHistory.push({ role: 'user', content: userMsg });
   state.chatHistory.push({ role: 'assistant', content: reply });
@@ -181,7 +183,6 @@ function showView(view) {
   document.querySelectorAll('.nav-item').forEach(n => {
     n.classList.toggle('active', n.dataset.view === view);
   });
-  const main = document.getElementById('main');
   const views = {
     dashboard: renderDashboard,
     callqueue: renderCallQueue,
@@ -191,7 +192,7 @@ function showView(view) {
     ai: renderAI,
     coaching: renderCoaching,
   };
-  main.innerHTML = '';
+  document.getElementById('main').innerHTML = '';
   (views[view] || renderDashboard)();
 }
 
@@ -200,10 +201,9 @@ async function renderDashboard() {
   const hot = state.contacts.filter(c => c.score >= 80).length;
   const callNeeded = state.contacts.filter(c => c.needsCall).length;
   const followNeeded = state.contacts.filter(c => c.daysSince > 5).length;
-  const top3 = state.contacts.sort((a, b) => b.score - a.score).slice(0, 3);
+  const top3 = [...state.contacts].sort((a, b) => b.score - a.score).slice(0, 3);
 
-  const main = document.getElementById('main');
-  main.innerHTML = `
+  document.getElementById('main').innerHTML = `
     <div class="topbar">
       <div class="topbar-left">
         <h2>Good morning 👋</h2>
@@ -238,26 +238,25 @@ async function renderDashboard() {
       </div>
     </div>`;
 
-  // Load AI briefing async
   try {
     const insight = await askAI(
       `Give me a sharp 2-sentence morning briefing: who are my top 3 contacts to prioritize today and why? Be specific with names.`,
       `Today's date: ${new Date().toLocaleDateString()}`
     );
-    document.querySelector('#ai-daily-insight .ai-insight-body').innerHTML = insight +
+    document.querySelector('#ai-daily-insight .ai-insight-body').innerHTML = insight.replace(/\n/g,'<br>') +
       `<div class="ai-chips">
         <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority contacts today')">Draft top 3 emails ↗</div>
         <div class="ai-chip" onclick="showView('callqueue')">Open call queue</div>
         <div class="ai-chip" onclick="openAIWithPrompt('Give me a coaching tip for my hardest objection today')">Get coaching tip ↗</div>
       </div>`;
-  } catch {
-    document.querySelector('#ai-daily-insight .ai-insight-body').textContent = 'AI briefing unavailable. Check your API key.';
+  } catch(e) {
+    document.querySelector('#ai-daily-insight .ai-insight-body').textContent = 'AI briefing unavailable — check your Anthropic API key in Vercel.';
   }
 }
 
 // ── CALL QUEUE ────────────────────────────────────────────────────────────────
 function renderCallQueue() {
-  const toCall = state.contacts
+  const toCall = [...state.contacts]
     .filter(c => c.needsCall)
     .sort((a, b) => b.score - a.score);
 
@@ -271,20 +270,35 @@ function renderCallQueue() {
     <div class="content">
       <div class="ai-insight">
         <div class="ai-insight-header"><div class="ai-insight-icon">💡</div><div class="ai-insight-title">Smart Dialing Order</div></div>
-        <div class="ai-insight-body">Contacts are sorted by AI priority score. Call top scores first — they're most likely to convert or need immediate attention. Contacts with no call history are flagged 🆕.</div>
+        <div class="ai-insight-body">Contacts are sorted by AI priority score. Call top scores first. Phone numbers are clickable — if you have the Aloware Chrome extension, it will intercept the call automatically. Contacts with no call history are flagged 🆕.</div>
       </div>
-      ${toCall.length === 0 ? '<div class="empty-state">🎉 No calls needed right now!</div>' :
-        '<div class="lead-list">' + toCall.map(callQueueItemHTML).join('') + '</div>'}
+      ${toCall.length === 0
+        ? '<div class="empty-state">🎉 No calls needed right now!</div>'
+        : '<div class="lead-list">' + toCall.map(callQueueItemHTML).join('') + '</div>'}
     </div>`;
 }
 
 function callQueueItemHTML(c) {
   const priority = c.score >= 80 ? 1 : c.score >= 60 ? 2 : 3;
+  const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+  const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
+  const phoneDisplay = c.phone
+    ? `<a href="tel:${cleanPhone}" onclick="event.stopPropagation()" style="color:var(--green);text-decoration:none;font-weight:600" title="Click to call via Aloware">📞 ${c.phone}</a>`
+    : '<span style="color:var(--text3)">No phone</span>';
   return `<div class="call-queue-item priority-${priority}" onclick="openContact('${c.id}')">
     <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
-    <div>
-      <div class="lead-name">${c.name} ${c.daysSince === 999 ? '🆕' : ''}</div>
-      <div class="lead-meta">${c.company || 'No company'} · Last call: ${c.lastContacted} · Score: ${c.score}</div>
+    <div style="min-width:0;flex:1">
+      <div class="lead-name" style="display:flex;align-items:center;gap:8px">
+        ${c.name} ${c.daysSince === 999 ? '🆕' : ''}
+        <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px" title="Open in HubSpot">HS ↗</a>
+      </div>
+      <div class="lead-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:3px">
+        <span>${c.company || 'No company'}</span>
+        <span>·</span>
+        ${phoneDisplay}
+        <span>·</span>
+        <span>Last call: ${c.lastContacted}</span>
+      </div>
     </div>
     <div class="call-actions">
       <button class="btn btn-sm btn-call" onclick="event.stopPropagation();logCall('${c.id}')">✅ Log call</button>
@@ -295,7 +309,7 @@ function callQueueItemHTML(c) {
 
 // ── FOLLOW-UPS ────────────────────────────────────────────────────────────────
 function renderFollowups() {
-  const due = state.contacts
+  const due = [...state.contacts]
     .filter(c => c.daysSince > 5 && c.daysSince < 60)
     .sort((a, b) => b.score - a.score);
 
@@ -303,30 +317,34 @@ function renderFollowups() {
     <div class="topbar">
       <div class="topbar-left"><h2>🔔 Follow-ups</h2><p>${due.length} contacts need a follow-up</p></div>
       <div class="topbar-right">
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Draft follow-up emails for my top 5 contacts who need follow-up. Make each one personalized and specific.')">✨ Draft all emails</button>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Draft follow-up emails for my top 5 contacts who need outreach. Make each one personalized and specific.')">✨ Draft all emails</button>
       </div>
     </div>
     <div class="content">
       ${due.length === 0 ? '<div class="empty-state">🎉 All caught up!</div>' :
-        '<div class="lead-list">' + due.map(c => `
-        <div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
-          <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
-          <div>
-            <div class="lead-name">${c.name}</div>
-            <div class="lead-meta">${c.company || 'No company'} · ${c.daysSince === 999 ? 'Never contacted' : `${c.daysSince} days since contact`}</div>
-          </div>
-          <div class="lead-right">
-            <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
-            <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Draft a follow-up email to ${c.name} at ${c.company}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Make it warm and specific.')">✨ Draft email</button>
-          </div>
-        </div>`).join('') + '</div>'}
+        '<div class="lead-list">' + due.map(c => {
+          const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+          return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
+            <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
+            <div>
+              <div class="lead-name" style="display:flex;align-items:center;gap:8px">
+                ${c.name}
+                <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
+              </div>
+              <div class="lead-meta">${c.company || 'No company'} · ${c.daysSince === 999 ? 'Never contacted' : `${c.daysSince} days since contact`}</div>
+            </div>
+            <div class="lead-right">
+              <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
+              <button class="btn btn-sm" onclick="event.stopPropagation();openAIWithPrompt('Draft a follow-up email to ${c.name} at ${c.company}. Stage: ${c.stage}. Last contacted: ${c.lastContacted}. Make it warm and specific.')">✨ Draft email</button>
+            </div>
+          </div>`;
+        }).join('') + '</div>'}
     </div>`;
 }
 
 // ── CONTACTS ──────────────────────────────────────────────────────────────────
 function renderContacts() {
   const sorted = [...state.contacts].sort((a, b) => b.score - a.score);
-
   document.getElementById('main').innerHTML = `
     <div class="topbar">
       <div class="topbar-left"><h2>👥 All Contacts</h2><p>${sorted.length} contacts synced from HubSpot</p></div>
@@ -350,10 +368,14 @@ function filterContacts(q) {
 }
 
 function leadCardHTML(c) {
+  const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
   return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')">
     <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color}">${c.initials}</div>
     <div>
-      <div class="lead-name">${c.name}</div>
+      <div class="lead-name" style="display:flex;align-items:center;gap:8px">
+        ${c.name}
+        <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
+      </div>
       <div class="lead-meta">${c.company || 'No company'} · ${c.daysSince === 999 ? 'Never contacted' : `Last contact: ${c.lastContacted}`}</div>
     </div>
     <div class="lead-right">
@@ -372,33 +394,35 @@ function renderPipeline() {
     opportunity: { label: 'Opportunity', class: 'negotiation', contacts: [] },
     customer: { label: 'Customer', class: 'closed', contacts: [] },
   };
-
   state.contacts.forEach(c => {
     const key = (c.stage || 'lead').toLowerCase().replace(/\s/g, '');
     if (stages[key]) stages[key].contacts.push(c);
     else stages['lead'].contacts.push(c);
   });
-
   const cols = Object.entries(stages).map(([, s]) => `
     <div>
       <div class="pipeline-col-header ${s.class}">${s.label} (${s.contacts.length})</div>
       <div class="pipeline-cards">
         ${s.contacts.length === 0 ? '<div style="font-size:11px;color:var(--text3);padding:8px 0">None</div>' :
-          s.contacts.map(c => `
-          <div class="pipeline-card" onclick="openContact('${c.id}')">
-            <div class="pipeline-card-name">${c.name}</div>
-            <div class="pipeline-card-company">${c.company || 'No company'}</div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-              <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}" style="font-size:9px">${c.score}</span>
-              <span style="font-size:10px;color:var(--text3)">${c.daysSince === 999 ? 'Never called' : `${c.daysSince}d ago`}</span>
-            </div>
-          </div>`).join('')}
+          s.contacts.map(c => {
+            const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+            return `<div class="pipeline-card" onclick="openContact('${c.id}')">
+              <div class="pipeline-card-name" style="display:flex;align-items:center;gap:6px">
+                ${c.name}
+                <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:9px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 5px;border-radius:4px">HS ↗</a>
+              </div>
+              <div class="pipeline-card-company">${c.company || 'No company'}</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+                <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}" style="font-size:9px">${c.score}</span>
+                <span style="font-size:10px;color:var(--text3)">${c.daysSince === 999 ? 'Never called' : `${c.daysSince}d ago`}</span>
+              </div>
+            </div>`;
+          }).join('')}
       </div>
     </div>`).join('');
-
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>📊 Pipeline</h2><p>${state.contacts.length} contacts across ${Object.keys(stages).length} stages</p></div>
+      <div class="topbar-left"><h2>📊 Pipeline</h2><p>${state.contacts.length} contacts across stages</p></div>
       <div class="topbar-right">
         <button class="btn btn-primary" onclick="openAIWithPrompt('Analyze my pipeline and tell me which contacts are most likely to close this month and what I should do with each.')">✨ Analyze pipeline</button>
       </div>
@@ -427,7 +451,7 @@ function renderAI() {
           <div class="ai-chip" onclick="sendPreset('Analyze my pipeline and tell me what deals are at risk')">Pipeline analysis ↗</div>
           <div class="ai-chip" onclick="sendPreset('Give me tips for handling the objection: we do not have budget right now')">Handle objection ↗</div>
         </div>
-        ${state.chatHistory.filter(m => m.role !== 'system').map(m => `
+        ${state.chatHistory.map(m => `
           <div class="msg ${m.role === 'user' ? 'user' : 'ai'}">
             <div class="msg-label">${m.role === 'user' ? 'You' : 'Assistant'}</div>
             <div class="msg-bubble">${m.content.replace(/\n/g, '<br>')}</div>
@@ -452,8 +476,8 @@ async function sendChat() {
     const reply = await askAI(msg);
     document.getElementById(loadId).outerHTML = `
       <div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble">${reply.replace(/\n/g, '<br>')}</div></div>`;
-  } catch {
-    document.getElementById(loadId).outerHTML = `<div class="msg ai"><div class="msg-bubble">Sorry, something went wrong.</div></div>`;
+  } catch(e) {
+    document.getElementById(loadId).outerHTML = `<div class="msg ai"><div class="msg-label">Assistant</div><div class="msg-bubble" style="color:var(--red)">Error: ${e.message}. Check your Anthropic API key in Vercel environment variables.</div></div>`;
   }
   scrollChat();
 }
@@ -496,54 +520,19 @@ function scrollChat() {
 }
 
 // ── SALES COACHING ────────────────────────────────────────────────────────────
-async function renderCoaching() {
+function renderCoaching() {
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🎯 Sales Coaching</h2><p>AI-powered tips, scripts, and objection handling</p></div>
+      <div class="topbar-left"><h2>🎯 Sales Coaching</h2><p>Coming soon — AI-powered tips, scripts, and objection handling</p></div>
     </div>
     <div class="content">
-      <div class="coaching-card">
-        <div class="coaching-tag">💡 Tip of the Day</div>
-        <div class="coaching-tip" id="coaching-tip"><span class="spinner"></span> Loading coaching tip...</div>
-      </div>
-
-      <div class="section-title">Quick coaching prompts</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        ${[
-          ['😤 Objection: No budget', 'Give me a word-for-word script for handling the objection: we do not have budget right now. Include 3 responses and a follow-up question.'],
-          ['😬 Objection: Not interested', 'Give me a script for when someone says they are not interested. How do I keep them engaged without being pushy?'],
-          ['📞 Cold call opener', 'Write me a cold call opener that gets attention in the first 10 seconds. Make it conversational, not salesy.'],
-          ['📧 Follow-up email that gets replies', 'Write a follow-up email template that actually gets replies. Subject line + 3 sentences max.'],
-          ['🤝 Discovery call questions', 'Give me 5 powerful discovery questions that uncover real pain points without being interrogative.'],
-          ['🏁 Closing techniques', 'Give me 3 closing techniques for when a prospect keeps saying they need to think about it.'],
-        ].map(([label, prompt]) => `
-          <button class="btn" style="justify-content:flex-start;text-align:left;height:auto;padding:12px 14px;line-height:1.4" onclick="openAIWithPrompt('${prompt.replace(/'/g, "\\'")}')">
-            ${label}
-          </button>`).join('')}
-      </div>
-
-      <div>
-        <div class="section-title" style="margin-bottom:8px">Custom coaching question</div>
-        <div style="display:flex;gap:8px">
-          <input id="coaching-input" placeholder="Ask for coaching on anything... e.g. how do I handle a price negotiation?" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:9px 14px;color:var(--text);font-size:13px;outline:none" onkeydown="if(event.key==='Enter')coachingAsk()" />
-          <button class="btn btn-primary" onclick="coachingAsk()">Ask ✨</button>
-        </div>
+      <div style="text-align:center;padding:60px 20px">
+        <div style="font-size:48px;margin-bottom:16px">🎯</div>
+        <div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:8px">Sales Coaching</div>
+        <div style="font-size:13px;color:var(--text2);max-width:360px;margin:0 auto 24px">Personalized coaching, objection handling scripts, and talk tracks — coming soon.</div>
+        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me 3 sales coaching tips specific to selling SEO to home service contractors')">✨ Ask AI for coaching now</button>
       </div>
     </div>`;
-
-  try {
-    const tip = await askAI('Give me one sharp, specific sales coaching tip I can use today. Make it actionable and under 3 sentences. Focus on something a typical sales rep misses.');
-    document.getElementById('coaching-tip').textContent = tip;
-  } catch {
-    document.getElementById('coaching-tip').textContent = 'Coaching unavailable right now.';
-  }
-}
-
-function coachingAsk() {
-  const input = document.getElementById('coaching-input');
-  const q = input.value.trim();
-  if (!q) return;
-  openAIWithPrompt(q);
 }
 
 // ── CONTACT MODAL ─────────────────────────────────────────────────────────────
@@ -551,11 +540,11 @@ async function openContact(id) {
   const c = state.contacts.find(x => x.id === id);
   if (!c) return;
   state.selectedContact = c;
-
   const notes = state.notes[id] || [];
-  const tasks = state.tasks[id] || [];
+  const hsUrl = `https://app.hubspot.com/contacts/45530742/contact/${c.id}`;
+  const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
 
-  document.getElementById('modal-title').textContent = c.name;
+  document.getElementById('modal-title').innerHTML = `${c.name} <a href="${hsUrl}" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:none;font-weight:400">Open in HubSpot ↗</a>`;
   document.getElementById('modal-body').innerHTML = `
     <div class="field-row">
       <div><div class="field-label">Company</div><div class="field-value">${c.company || '—'}</div></div>
@@ -563,7 +552,9 @@ async function openContact(id) {
     </div>
     <div class="field-row">
       <div><div class="field-label">Email</div><div class="field-value" style="color:var(--blue)">${c.email || '—'}</div></div>
-      <div><div class="field-label">Phone</div><div class="field-value">${c.phone || '—'}</div></div>
+      <div><div class="field-label">Phone</div><div class="field-value">
+        ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:600">📞 ${c.phone}</a>` : '—'}
+      </div></div>
     </div>
     <div class="field-row">
       <div><div class="field-label">Stage</div><div class="field-value">${c.stage}</div></div>
@@ -573,13 +564,11 @@ async function openContact(id) {
       <div><div class="field-label">Last Contact</div><div class="field-value">${c.lastContacted}</div></div>
       <div><div class="field-label">Days Since</div><div class="field-value">${c.daysSince === 999 ? 'Never' : c.daysSince + ' days'}</div></div>
     </div>
-
     <div style="border-top:1px solid var(--border);padding-top:14px">
       <div class="field-label" style="margin-bottom:8px">Log a note</div>
       <textarea id="note-input" placeholder="Add a call note, meeting summary, anything..."></textarea>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="saveNote('${id}')">Save note</button>
+      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="saveNote('${id}')">Save note to HubSpot</button>
     </div>
-
     <div style="border-top:1px solid var(--border);padding-top:14px">
       <div class="field-label" style="margin-bottom:8px">Notes (${notes.length})</div>
       <div class="notes-area" id="notes-list">
@@ -601,40 +590,27 @@ async function saveNote(contactId) {
   const input = document.getElementById('note-input');
   const text = input.value.trim();
   if (!text) return;
-
-  // Save to HubSpot as an engagement note
   try {
     await hsPost('/crm/v3/objects/notes', {
-      properties: {
-        hs_note_body: text,
-        hs_timestamp: Date.now(),
-      },
-      associations: [{
-        to: { id: contactId },
-        types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }],
-      }],
+      properties: { hs_note_body: text, hs_timestamp: Date.now() },
+      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }] }],
     });
     toast('Note saved to HubSpot ✓', 'success');
   } catch {
     toast('Saved locally (HubSpot sync failed)', 'error');
   }
-
   if (!state.notes[contactId]) state.notes[contactId] = [];
   state.notes[contactId].unshift({ text, date: new Date().toLocaleString() });
   input.value = '';
-
   const list = document.getElementById('notes-list');
-  if (list) {
-    list.innerHTML = state.notes[contactId].map(n =>
-      `<div class="note-card"><div class="note-meta">${n.date}</div><div class="note-body">${n.text}</div></div>`
-    ).join('');
-  }
+  if (list) list.innerHTML = state.notes[contactId].map(n =>
+    `<div class="note-card"><div class="note-meta">${n.date}</div><div class="note-body">${n.text}</div></div>`
+  ).join('');
 }
 
 async function logCall(contactId) {
   const c = state.contacts.find(x => x.id === contactId);
   if (!c) return;
-
   try {
     await hsPost('/crm/v3/objects/calls', {
       properties: {
@@ -643,14 +619,9 @@ async function logCall(contactId) {
         hs_call_status: 'COMPLETED',
         hs_call_duration: 0,
       },
-      associations: [{
-        to: { id: contactId },
-        types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 194 }],
-      }],
+      associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 194 }] }],
     });
     toast(`Call logged for ${c.name} ✓`, 'success');
-
-    // Update local state
     const contact = state.contacts.find(x => x.id === contactId);
     if (contact) {
       contact.daysSince = 0;
@@ -677,11 +648,10 @@ function toast(msg, type = '') {
   setTimeout(() => el.remove(), 3500);
 }
 
-// ─── NAV ──────────────────────────────────────────────────────────────────────
+// ─── NAV & MODAL ──────────────────────────────────────────────────────────────
 document.querySelectorAll('.nav-item').forEach(item => {
   item.addEventListener('click', () => showView(item.dataset.view));
 });
-
 document.getElementById('modal').addEventListener('click', e => {
   if (e.target === document.getElementById('modal')) closeModal();
 });
@@ -690,7 +660,6 @@ document.getElementById('modal').addEventListener('click', e => {
 async function init() {
   showView('dashboard');
   await Promise.all([loadContacts(), loadDeals()]);
-  // Re-render dashboard with real data
   if (state.currentView === 'dashboard') showView('dashboard');
 }
 
