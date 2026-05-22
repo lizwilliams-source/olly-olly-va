@@ -745,7 +745,10 @@ async function loadUserList() {
         <div style="font-size:13px;font-weight:500">${u.name} ${u.isAdmin ? '<span style="font-size:10px;background:var(--blue-dim);color:var(--blue);padding:1px 6px;border-radius:4px">admin</span>' : ''}</div>
         <div style="font-size:11px;color:var(--text2)">${u.email} · HubSpot owner: ${u.ownerId || 'not found'}</div>
       </div>
-      <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="deleteUser('${u.email}')">Remove</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="editUser('${u.email}','${u.name}')">Edit</button>
+        <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="deleteUser('${u.email}')">Remove</button>
+      </div>
     </div>`).join('');
 }
 
@@ -891,6 +894,21 @@ async function logCall(contactId) {
 
 function closeModal() {
   document.getElementById('modal').style.display = 'none';
+}
+
+async function editUser(email, name) {
+  const newName = prompt('Name:', name);
+  if (!newName) return;
+  const newPassword = prompt('New password (leave blank to keep current):', '');
+  
+  const res = await fetch('/api/users?action=edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ email, name: newName, password: newPassword || null }),
+  });
+  const data = await res.json();
+  if (data.ok) { toast('User updated ✓', 'success'); loadUserList(); }
+  else toast(data.error || 'Failed to update', 'error');
 }
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
