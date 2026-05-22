@@ -227,5 +227,50 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  // ── QUEUE: GET ─────────────────────────────────────────────────────────────
+  if (action === 'getqueue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const queue = await kvGet(`queue:${session.email}`) || [];
+    return res.status(200).json(queue);
+  }
+
+  // ── QUEUE: ADD ─────────────────────────────────────────────────────────────
+  if (action === 'addqueue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { company } = req.body;
+    if (!company?.id) return res.status(400).json({ error: 'Company required' });
+    const queue = await kvGet(`queue:${session.email}`) || [];
+    if (!queue.find(c => c.id === company.id)) {
+      queue.push(company);
+      await kvSet(`queue:${session.email}`, queue);
+    }
+    return res.status(200).json({ ok: true, count: queue.length });
+  }
+
+  // ── QUEUE: REMOVE ──────────────────────────────────────────────────────────
+  if (action === 'removequeue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { companyId } = req.body;
+    const queue = await kvGet(`queue:${session.email}`) || [];
+    const updated = queue.filter(c => c.id !== companyId);
+    await kvSet(`queue:${session.email}`, updated);
+    return res.status(200).json({ ok: true, count: updated.length });
+  }
+
+  // ── QUEUE: CLEAR ───────────────────────────────────────────────────────────
+  if (action === 'clearqueue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    await kvSet(`queue:${session.email}`, []);
+    return res.status(200).json({ ok: true });
+  }
+
 return res.status(400).json({ error: 'Unknown action' });
 }
