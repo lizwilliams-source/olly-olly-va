@@ -124,7 +124,7 @@ const COMPANY_PROPS = [
   'name', 'phone', 'city', 'state', 'website',
   'hubspot_owner_id', 'notes_last_contacted', 'num_contacted_notes',
   'lifecyclestage', 'hs_lead_status', 'createdate', 'lastmodifieddate',
-  'industry', 'timezone', 'lead_source', 'subscription_status',
+  'industry', 'timezone_', 'lead_source', 'subscription_status',
   'hs_last_logged_call_date', 'dnr', 'recent_user_to_call',
   'hubspot_owner_assigneddate', 'notes_next_activity_date'
 ];
@@ -201,7 +201,7 @@ function enrichContact(raw) {
   const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return {
     id: raw.id, name, phone: p.phone || '', city: p.city || '', state: p.state || '',
-    website: p.website || '', industry: p.industry || '', timezone: p.timezone || '',
+    website: p.website || '', industry: p.industry || '', timezone: p['timezone_'] || '',
     leadSource: p.lead_source || '', stage: p.lifecyclestage || p.hs_lead_status || 'lead',
     masterStage: p.subscription_status || '', ownerId: p.hubspot_owner_id || '',
     daysSince, lastContacted: lastContactedMs ? new Date(lastContactedMs).toLocaleDateString() : 'Never',
@@ -599,9 +599,8 @@ function renderPriorityPage(viewKey) {
           <a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;flex-shrink:0">HS ↗</a>
         </div>
         <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
-          ${p.timezone ? `<span>🕐 ${p.timezone}</span>` : ''}
-          ${p.lead_source ? `<span>· 📌 ${p.lead_source}</span>` : ''}
-          ${p.subscription_status ? `<span>· <span style="color:var(--amber)">${p.subscription_status}</span></span>` : ''}
+          ${p['timezone_'] ? `<span>🕐 ${p['timezone_']}</span>` : ''}
+          ${p.lead_source ? `<span>${p['timezone_'] ? '·' : ''} 📌 ${p.lead_source}</span>` : ''}
         </div>
       </div>
       <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
