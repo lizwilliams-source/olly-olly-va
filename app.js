@@ -739,17 +739,47 @@ async function loadUserList() {
   const users = await res.json();
   const list = document.getElementById('user-list');
   if (!Array.isArray(users)) { list.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load users</div>'; return; }
+  
   list.innerHTML = users.map(u => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
-      <div>
-        <div style="font-size:13px;font-weight:500">${u.name} ${u.isAdmin ? '<span style="font-size:10px;background:var(--blue-dim);color:var(--blue);padding:1px 6px;border-radius:4px">admin</span>' : ''}</div>
-        <div style="font-size:11px;color:var(--text2)">${u.email} · HubSpot owner: ${u.ownerId || 'not found'}</div>
+    <div id="user-row-${u.email.replace(/[@.]/g,'-')}" style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:center">
+        <div>
+          <div class="field-label" style="margin-bottom:3px">Name</div>
+          <input value="${u.name}" id="edit-name-${u.email.replace(/[@.]/g,'-')}" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" />
+        </div>
+        <div>
+          <div class="field-label" style="margin-bottom:3px">Email</div>
+          <input value="${u.email}" id="edit-email-${u.email.replace(/[@.]/g,'-')}" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" />
+        </div>
+        <div>
+          <div class="field-label" style="margin-bottom:3px">New password</div>
+          <input placeholder="Leave blank to keep" id="edit-pass-${u.email.replace(/[@.]/g,'-')}" type="password" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none" />
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;padding-top:16px">
+          <button class="btn btn-sm btn-primary" onclick="saveUser('${u.email}')">Save</button>
+          <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="deleteUser('${u.email}')">Remove</button>
+        </div>
       </div>
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="editUser('${u.email}','${u.name}')">Edit</button>
-        <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="deleteUser('${u.email}')">Remove</button>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">
+        HubSpot owner: ${u.ownerId || 'not found'} · ${u.isAdmin ? '<span style="color:var(--blue)">admin</span>' : 'standard user'}
       </div>
     </div>`).join('');
+}
+
+async function saveUser(originalEmail) {
+  const key = originalEmail.replace(/[@.]/g,'-');
+  const name = document.getElementById(`edit-name-${key}`).value.trim();
+  const email = document.getElementById(`edit-email-${key}`).value.trim();
+  const password = document.getElementById(`edit-pass-${key}`).value.trim();
+
+  const res = await fetch('/api/users?action=edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ originalEmail, email, name, password: password || null }),
+  });
+  const data = await res.json();
+  if (data.ok) { toast('User updated ✓', 'success'); loadUserList(); }
+  else toast(data.error || 'Failed to update', 'error');
 }
 
 async function addUser() {
