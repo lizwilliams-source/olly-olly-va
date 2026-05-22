@@ -7,11 +7,26 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"></script>
 </head>
 <body>
 
-<div class="app">
-  <!-- SIDEBAR -->
+<!-- LOGIN SCREEN -->
+<div id="login-screen" style="display:none">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="login-logo-icon">⚡</div>
+        <h1>Olly Olly</h1>
+        <p>Virtual Assistant</p>
+      </div>
+      <div id="clerk-sign-in"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app" id="app-screen" style="display:none">
   <aside class="sidebar">
     <div class="sidebar-logo">
       <h1>Olly Olly</h1>
@@ -31,9 +46,9 @@
       <span class="nav-badge" id="followup-badge">0</span>
     </div>
 
-    <span class="nav-section-label">Contacts</span>
+    <span class="nav-section-label">Companies</span>
     <div class="nav-item" data-view="contacts">
-      <span class="icon">👥</span> All Contacts
+      <span class="icon">🏢</span> My Companies
     </div>
     <div class="nav-item" data-view="pipeline">
       <span class="icon">📊</span> Pipeline
@@ -48,14 +63,15 @@
     </div>
 
     <div class="sidebar-footer">
+      <div class="user-info" id="user-info"></div>
       <div class="hs-status">
         <div class="hs-dot" id="hs-dot"></div>
-        <span id="hs-status-text">Connecting to HubSpot...</span>
+        <span id="hs-status-text">Connecting...</span>
       </div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%" onclick="signOut()">Sign out</button>
     </div>
   </aside>
 
-  <!-- MAIN -->
   <main class="main" id="main"></main>
 </div>
 
