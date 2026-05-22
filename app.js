@@ -722,7 +722,6 @@ async function bulkAddUsers() {
       } else {
         results.push(`✗ ${name} — ${data.error || 'Failed'}`);
       }
-      }
     } catch {
       results.push(`✗ ${name} — failed`);
     }
