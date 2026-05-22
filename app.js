@@ -44,7 +44,11 @@ async function login() {
     state.user = { email: data.email, name: data.name };
     state.ownerId = data.ownerId;
     state.isAdmin = data.isAdmin;
-    showApp();
+    if (!data.ownerId) {
+      showOwnerSetup();
+    } else {
+      showApp();
+    }
   } catch (e) {
     errorEl.textContent = 'Something went wrong. Try again.';
     errorEl.style.display = 'block';
