@@ -1096,35 +1096,17 @@ async function handleAudioUpload(companyId) {
     </div>`;
 
   try {
-    // Step 1: Get a client upload token from our server
-    const tokenRes = await fetch('/api/upload-audio', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'blob.generate-client-token',
-        payload: {
-          pathname: file.name,
-          callbackUrl: window.location.origin + '/api/upload-audio',
-          multipart: false,
-          clientPayload: null,
-        },
-      }),
-    });
-    if (!tokenRes.ok) throw new Error('Failed to get upload token');
-    const { clientToken } = await tokenRes.json();
+    // Wait up to 20s for blob client to finish loading (preloaded in index.html)
+    const deadline = Date.now() + 20000;
+    while (!window.__blobUpload && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+    if (!window.__blobUpload) throw new Error('Upload module not ready — please refresh the page');
 
-    // Step 2: PUT file directly to Vercel Blob (bypasses 4.5MB serverless limit)
-    const uploadRes = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(file.name)}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${clientToken}`,
-        'x-api-version': '7',
-        'x-content-type': file.type || 'audio/mpeg',
-      },
-      body: file,
+    const { url: blobUrl } = await window.__blobUpload(file.name, file, {
+      access: 'public',
+      handleUploadUrl: '/api/upload-audio',
     });
-    if (!uploadRes.ok) throw new Error('Failed to upload audio');
-    const { url: blobUrl } = await uploadRes.json();
 
     document.getElementById('transcribe-status').textContent = 'Transcribing with Whisper AI...';
 
