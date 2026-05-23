@@ -1081,54 +1081,57 @@ async function handleAudioUpload(companyId) {
   const file = document.getElementById('audio-upload').files[0];
   if (!file) return;
 
-  const maxSize = 25 * 1024 * 1024; // 25MB Whisper limit
-  if (file.size > maxSize) {
-    toast('File too large — max 25MB. Try a shorter clip.', 'error');
-    return;
-  }
-
-  // Show progress
   document.getElementById('call-logger-content').innerHTML = `
     <div style="text-align:center;padding:30px">
       <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 16px"></div>
       <div id="transcribe-status" style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">Uploading recording...</div>
-      <div style="font-size:12px;color:var(--text2)">This takes 30-60 seconds for a 15 min call</div>
+      <div style="font-size:12px;color:var(--text2)">Long calls can take 10+ min</div>
     </div>`;
 
   try {
-    // Wait up to 20s for blob client to finish loading (preloaded in index.html)
-    const deadline = Date.now() + 20000;
-    while (!window.__blobUpload && Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 200));
-    }
-    if (!window.__blobUpload) throw new Error('Upload module not ready — please refresh the page');
+    const { assemblyAiKey } = await fetch('/api/config').then(r => r.json());
 
-    const { url: blobUrl } = await window.__blobUpload(file.name, file, {
-      access: 'public',
-      handleUploadUrl: '/api/upload-audio',
-    });
-
-    document.getElementById('transcribe-status').textContent = 'Transcribing... (long calls can take 10+ min)';
-
-    const submitRes = await fetch('/api/transcribe', {
+    // Upload directly to AssemblyAI
+    const uploadRes = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blobUrl, companyName: c.name }),
+      headers: { 'Authorization': assemblyAiKey },
+      body: file,
     });
-    const submitData = await submitRes.json();
-    if (!submitRes.ok) throw new Error(submitData.error || 'Failed to start transcription');
+    if (!uploadRes.ok) throw new Error('Upload failed');
+    const { upload_url } = await uploadRes.json();
 
-    const params = new URLSearchParams({ jobId: submitData.jobId, companyName: c.name, blobUrl });
+    // Submit transcription job
+    document.getElementById('transcribe-status').textContent = 'Transcribing...';
+    const jobRes = await fetch('https://api.assemblyai.com/v2/transcript', {
+      method: 'POST',
+      headers: { 'Authorization': assemblyAiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio_url: upload_url, language_code: 'en' }),
+    });
+    if (!jobRes.ok) throw new Error('Failed to start transcription');
+    const { id: jobId } = await jobRes.json();
+
+    // Poll AssemblyAI directly
+    let transcript;
     while (true) {
       await new Promise(r => setTimeout(r, 5000));
-      const statusRes = await fetch(`/api/transcribe-status?${params}`);
+      const statusRes = await fetch(`https://api.assemblyai.com/v2/transcript/${jobId}`, {
+        headers: { 'Authorization': assemblyAiKey },
+      });
       const statusData = await statusRes.json();
-      if (!statusRes.ok) throw new Error(statusData.error || 'Transcription failed');
-      if (statusData.status === 'completed') {
-        showCallAnalysis(companyId, statusData.transcript, statusData.analysis);
-        return;
-      }
+      if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
+      if (statusData.status === 'completed') { transcript = statusData.text; break; }
     }
+
+    // Analyze with Claude
+    document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
+    const analysisRes = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcript, companyName: c.name }),
+    });
+    const { analysis } = await analysisRes.json();
+
+    showCallAnalysis(companyId, transcript, analysis);
   } catch (e) {
     document.getElementById('call-logger-content').innerHTML = `
       <div style="text-align:center;padding:20px">
