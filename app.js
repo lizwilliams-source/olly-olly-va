@@ -249,7 +249,7 @@ async function askAI(userMsg, extraContext = '') {
   ).join('\n');
   const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.\n\nTheir current companies (top 20):\n${contactSummary}\n\n${extraContext}\n\nBe concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling.`;
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
-  const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 1000, system, messages }) });
+  const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ max_tokens: 1000, system, messages }) });
   if (!res.ok) throw new Error(`AI API error: ${res.status}`);
   const data = await res.json();
   if (data.error) throw new Error(JSON.stringify(data.error));
@@ -803,8 +803,53 @@ function renderCoaching() {
 }
 
 // ── ADMIN ─────────────────────────────────────────────────────────────────────
+async function loadUsageDashboard(month) {
+  const el = document.getElementById('usage-table');
+  if (!el) return;
+  el.innerHTML = '<span class="spinner"></span> Loading...';
+  const res = await fetch(`/api/usage?month=${month}`, { headers: { Authorization: `Bearer ${state.token}` } });
+  const { rows } = await res.json();
+  if (!rows?.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px">No usage data for this month yet.</div>'; return; }
+  const fmt = n => `$${n.toFixed(4)}`;
+  const fmtMin = s => s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`;
+  const total = rows.reduce((a, r) => ({ groq: a.groq + r.groq_cost, claude: a.claude + r.claude_cost, total: a.total + r.total_cost }), { groq: 0, claude: 0, total: 0 });
+  el.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="color:var(--text3);text-align:left;border-bottom:1px solid var(--border)">
+          <th style="padding:6px 8px">Rep</th>
+          <th style="padding:6px 8px;text-align:center">Calls</th>
+          <th style="padding:6px 8px;text-align:center">AI Queries</th>
+          <th style="padding:6px 8px;text-align:right">Groq (audio)</th>
+          <th style="padding:6px 8px;text-align:right">Groq cost</th>
+          <th style="padding:6px 8px;text-align:right">Claude cost</th>
+          <th style="padding:6px 8px;text-align:right">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px"><div style="font-weight:500;color:var(--text)">${r.name}</div><div style="color:var(--text3);font-size:11px">${r.email}</div></td>
+            <td style="padding:8px;text-align:center;color:var(--text2)">${r.calls}</td>
+            <td style="padding:8px;text-align:center;color:var(--text2)">${r.ai_queries}</td>
+            <td style="padding:8px;text-align:right;color:var(--text2)">${fmtMin(r.groq_seconds)}</td>
+            <td style="padding:8px;text-align:right;color:var(--text2)">${fmt(r.groq_cost)}</td>
+            <td style="padding:8px;text-align:right;color:var(--text2)">${fmt(r.claude_cost)}</td>
+            <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(r.total_cost)}</td>
+          </tr>`).join('')}
+        <tr style="border-top:2px solid var(--border)">
+          <td style="padding:8px;font-weight:600;color:var(--text)" colspan="4">Total</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(total.groq)}</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(total.claude)}</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--green)">${fmt(total.total)}</td>
+        </tr>
+      </tbody>
+    </table>`;
+}
+
 async function renderAdmin() {
   if (!state.isAdmin) { showView('dashboard'); return; }
+  const currentMonth = new Date().toISOString().slice(0, 7);
   document.getElementById('main').innerHTML = `
     <div class="topbar"><div class="topbar-left"><h2>⚙️ Admin</h2><p>Manage team members</p></div></div>
     <div class="content">
@@ -830,8 +875,17 @@ async function renderAdmin() {
         <div class="section-title" style="margin-bottom:12px">Team members</div>
         <div id="user-list"><span class="spinner"></span> Loading...</div>
       </div>
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div class="section-title">API Usage & Cost</div>
+          <input type="month" id="usage-month" value="${currentMonth}" onchange="loadUsageDashboard(this.value)"
+            style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none" />
+        </div>
+        <div id="usage-table"><span class="spinner"></span> Loading...</div>
+      </div>
     </div>`;
   loadUserList();
+  loadUsageDashboard(currentMonth);
 }
 
 function autoFillUser() {
@@ -1106,7 +1160,7 @@ async function handleAudioUpload(companyId) {
           totalChunks > 1 ? `Transcribing... (part ${i + 1}/${totalChunks})` : 'Transcribing...';
         const transcribeRes = await fetch('/api/transcribe', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
+          headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${state.token}` },
           body: chunk,
         });
         const transcribeData = await transcribeRes.json();
@@ -1122,7 +1176,7 @@ async function handleAudioUpload(companyId) {
     document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
     const analysisRes = await fetch('/api/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
       body: JSON.stringify({ transcript, companyName: c.name }),
     });
     const analysisJson = await analysisRes.json();

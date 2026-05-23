@@ -1,9 +1,11 @@
+import { getSession, logUsage } from './_helpers.js';
+
 export const config = { api: { bodyParser: false }, maxDuration: 60 };
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
@@ -14,6 +16,7 @@ export default async function handler(req, res) {
     const formData = new FormData();
     formData.append('file', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'audio.mp3');
     formData.append('model', 'whisper-large-v3-turbo');
+    formData.append('response_format', 'verbose_json');
 
     const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
@@ -23,6 +26,13 @@ export default async function handler(req, res) {
 
     const groqData = await groqRes.json();
     if (!groqRes.ok) throw new Error(groqData.error?.message || JSON.stringify(groqData));
+
+    // Log usage async — don't block the response
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await getSession(token);
+    if (session?.email) {
+      logUsage(session.email, { groq_seconds: groqData.duration || 0, calls: 1 }).catch(() => {});
+    }
 
     return res.status(200).json({ transcript: groqData.text });
   } catch (err) {

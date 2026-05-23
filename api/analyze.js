@@ -1,9 +1,11 @@
+import { getSession, logUsage } from './_helpers.js';
+
 export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
@@ -45,6 +47,16 @@ Extract and return ONLY a JSON object with these fields:
     if (!analysisRes.ok) throw new Error(`Claude API error: ${analysisData.error?.message || JSON.stringify(analysisData)}`);
     const analysisText = analysisData.content?.[0]?.text || '';
     if (!analysisText) throw new Error('Claude returned empty response');
+
+    // Log usage async
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await getSession(token);
+    if (session?.email && analysisData.usage) {
+      logUsage(session.email, {
+        claude_input: analysisData.usage.input_tokens || 0,
+        claude_output: analysisData.usage.output_tokens || 0,
+      }).catch(() => {});
+    }
 
     let analysis;
     try {
