@@ -1096,12 +1096,35 @@ async function handleAudioUpload(companyId) {
     </div>`;
 
   try {
-    // Upload directly to Vercel Blob (bypasses 4.5MB serverless limit)
-    const { upload } = await import('https://esm.sh/@vercel/blob/client');
-    const { url: blobUrl } = await upload(file.name, file, {
-      access: 'public',
-      handleUploadUrl: '/api/upload-audio',
+    // Step 1: Get a client upload token from our server
+    const tokenRes = await fetch('/api/upload-audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'blob.generate-client-token',
+        payload: {
+          pathname: file.name,
+          callbackUrl: window.location.origin + '/api/upload-audio',
+          multipart: false,
+          clientPayload: null,
+        },
+      }),
     });
+    if (!tokenRes.ok) throw new Error('Failed to get upload token');
+    const { clientToken } = await tokenRes.json();
+
+    // Step 2: PUT file directly to Vercel Blob (bypasses 4.5MB serverless limit)
+    const uploadRes = await fetch(`https://blob.vercel-storage.com/${encodeURIComponent(file.name)}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${clientToken}`,
+        'x-api-version': '7',
+        'x-content-type': file.type || 'audio/mpeg',
+      },
+      body: file,
+    });
+    if (!uploadRes.ok) throw new Error('Failed to upload audio');
+    const { url: blobUrl } = await uploadRes.json();
 
     document.getElementById('transcribe-status').textContent = 'Transcribing with Whisper AI...';
 
