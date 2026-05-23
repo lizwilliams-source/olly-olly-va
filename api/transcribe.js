@@ -1,5 +1,3 @@
-import FormData from 'form-data';
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -15,11 +13,9 @@ export default async function handler(req, res) {
     const audioBuffer = Buffer.from(audioBase64, 'base64');
     
     // Send to Whisper API
+    const audioBlob = new Blob([audioBuffer], { type: mimeType || 'audio/mpeg' });
     const formData = new FormData();
-    formData.append('file', audioBuffer, {
-      filename: 'recording.mp3',
-      contentType: mimeType || 'audio/mpeg',
-    });
+    formData.append('file', audioBlob, 'recording.mp3');
     formData.append('model', 'whisper-1');
     formData.append('language', 'en');
 
@@ -27,7 +23,6 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        ...formData.getHeaders(),
       },
       body: formData,
     });
