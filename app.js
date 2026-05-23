@@ -1031,5 +1031,262 @@ async function manualRefresh() {
   toast('Data refreshed ✓', 'success');
 }
 
+// ─── GOOGLE CALENDAR ──────────────────────────────────────────────────────────
+async function connectGoogleCalendar() {
+  try {
+    const res = await fetch('/api/calendar?action=authurl', {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    const data = await res.json();
+    if (data.url) window.open(data.url, '_blank');
+  } catch (e) {
+    toast('Failed to connect Google Calendar', 'error');
+  }
+}
+
+// Check if coming back from Google OAuth
+if (window.location.search.includes('calendar=connected')) {
+  toast('Google Calendar connected! ✓', 'success');
+  window.history.replaceState({}, '', '/');
+}
+
+// ─── CALL LOGGING MODAL ───────────────────────────────────────────────────────
+async function openCallLogger(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  if (!c) return;
+
+  document.getElementById('modal-title').innerHTML = `📞 Log Call — ${c.name}`;
+  document.getElementById('modal-body').innerHTML = `
+    <div id="call-logger-content">
+      <div style="text-align:center;padding:20px">
+        <div style="font-size:40px;margin-bottom:12px">🎙️</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">Upload call recording</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Upload the Aloware recording and AI will transcribe it, write call notes, and schedule a follow-up automatically.</div>
+        <input type="file" id="audio-upload" accept="audio/*,.mp3,.mp4,.m4a,.wav,.webm" style="display:none" onchange="handleAudioUpload('${companyId}')" />
+        <button class="btn btn-primary" style="justify-content:center;width:100%;margin-bottom:8px" onclick="document.getElementById('audio-upload').click()">
+          📁 Choose recording file
+        </button>
+        <div style="font-size:11px;color:var(--text3)">Supports MP3, MP4, M4A, WAV · ~$0.09 per 15 min call</div>
+      </div>
+    </div>`;
+
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
+
+  document.getElementById('modal').style.display = 'flex';
+}
+
+async function handleAudioUpload(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  const file = document.getElementById('audio-upload').files[0];
+  if (!file) return;
+
+  const maxSize = 25 * 1024 * 1024; // 25MB Whisper limit
+  if (file.size > maxSize) {
+    toast('File too large — max 25MB. Try a shorter clip.', 'error');
+    return;
+  }
+
+  // Show progress
+  document.getElementById('call-logger-content').innerHTML = `
+    <div style="text-align:center;padding:30px">
+      <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 16px"></div>
+      <div id="transcribe-status" style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">Uploading recording...</div>
+      <div style="font-size:12px;color:var(--text2)">This takes 30-60 seconds for a 15 min call</div>
+    </div>`;
+
+  try {
+    // Convert file to base64
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById('transcribe-status').textContent = 'Transcribing with Whisper AI...';
+
+    const res = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audioBase64: base64,
+        mimeType: file.type,
+        companyName: c.name,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Transcription failed');
+
+    document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
+
+    // Show results
+    showCallAnalysis(companyId, data.transcript, data.analysis);
+  } catch (e) {
+    document.getElementById('call-logger-content').innerHTML = `
+      <div style="text-align:center;padding:20px">
+        <div style="font-size:36px;margin-bottom:12px">❌</div>
+        <div style="font-size:14px;font-weight:600;color:var(--red);margin-bottom:8px">Transcription failed</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:16px">${e.message}</div>
+        <button class="btn btn-primary" onclick="openCallLogger('${companyId}')">Try again</button>
+      </div>`;
+  }
+}
+
+function showCallAnalysis(companyId, transcript, analysis) {
+  const c = state.contacts.find(x => x.id === companyId);
+  const followUpDate = analysis.followUpDate ? new Date(analysis.followUpDate) : null;
+  const followUpDateStr = followUpDate ? followUpDate.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' }) : null;
+
+  document.getElementById('call-logger-content').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px">
+
+      <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px">
+        <div class="field-label" style="margin-bottom:6px">📋 Call Summary</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.6">${analysis.summary || 'No summary available'}</div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${analysis.interested ? 'var(--green-dim)' : 'var(--red-dim)'};color:${analysis.interested ? 'var(--green)' : 'var(--red)'}">
+            ${analysis.interested ? '✓ Interested' : '✗ Not interested'}
+          </span>
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--bg2);color:var(--text2)">
+            ${analysis.sentiment || 'neutral'}
+          </span>
+        </div>
+      </div>
+
+      <div>
+        <div class="field-label" style="margin-bottom:6px">📝 Call Notes</div>
+        <textarea id="call-notes-input" style="width:100%;min-height:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${analysis.callNotes || ''}</textarea>
+      </div>
+
+      ${analysis.followUpCommitment ? `
+      <div style="background:var(--blue-dim);border:1px solid rgba(79,142,247,.2);border-radius:var(--radius-sm);padding:12px">
+        <div class="field-label" style="margin-bottom:6px;color:var(--blue)">📅 Follow-up Detected</div>
+        <div style="font-size:13px;color:var(--text);margin-bottom:8px">"${analysis.followUpCommitment}"</div>
+        ${followUpDateStr ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Suggested date: <strong style="color:var(--text)">${followUpDateStr}</strong></div>` : ''}
+        <input type="datetime-local" id="followup-datetime" 
+          value="${analysis.followUpDate ? analysis.followUpDate.slice(0,16) : ''}"
+          style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">
+            📅 Add to Google Calendar
+          </button>
+          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">
+            ✅ Create HubSpot Task
+          </button>
+        </div>
+      </div>` : `
+      <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px">
+        <div class="field-label" style="margin-bottom:6px">📅 Schedule Follow-up</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px">No follow-up commitment detected — set one manually:</div>
+        <input type="datetime-local" id="followup-datetime"
+          style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">
+            📅 Add to Google Calendar
+          </button>
+          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">
+            ✅ Create HubSpot Task
+          </button>
+        </div>
+      </div>`}
+
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveCallNotes('${companyId}')">
+          💾 Save notes to HubSpot
+        </button>
+        <button class="btn" style="flex:1;justify-content:center" onclick="showTranscript(\`${transcript.replace(/`/g, '\\`').replace(/\$/g, '\\$').slice(0, 5000)}\`)">
+          📄 View transcript
+        </button>
+      </div>
+    </div>`;
+
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
+}
+
+async function createCalendarEvent(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  const dt = document.getElementById('followup-datetime')?.value;
+  if (!dt) { toast('Pick a date and time first', 'error'); return; }
+
+  const startTime = new Date(dt).toISOString();
+  const endTime = new Date(new Date(dt).getTime() + 30 * 60000).toISOString();
+  const notes = document.getElementById('call-notes-input')?.value || '';
+
+  try {
+    const res = await fetch('/api/calendar?action=create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({
+        title: `Follow-up call — ${c.name}`,
+        description: notes,
+        startTime,
+        endTime,
+      }),
+    });
+    const data = await res.json();
+    if (data.needsConnect) {
+      if (confirm('Google Calendar not connected. Connect now?')) connectGoogleCalendar();
+      return;
+    }
+    if (!data.ok) throw new Error(data.error);
+    toast('📅 Calendar event created! ✓', 'success');
+    if (data.eventLink) window.open(data.eventLink, '_blank');
+  } catch (e) {
+    toast('Failed to create calendar event: ' + e.message, 'error');
+  }
+}
+
+async function createHubSpotTask(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  const dt = document.getElementById('followup-datetime')?.value;
+  const notes = document.getElementById('call-notes-input')?.value || '';
+
+  try {
+    const dueDate = dt ? new Date(dt).getTime() : Date.now() + 14 * 86400000;
+    await hsPost('/crm/v3/objects/tasks', {
+      properties: {
+        hs_task_subject: `Follow-up call — ${c.name}`,
+        hs_task_body: notes,
+        hs_timestamp: dueDate,
+        hs_task_status: 'NOT_STARTED',
+        hs_task_type: 'CALL',
+        hubspot_owner_id: state.ownerId,
+      },
+      associations: [{
+        to: { id: companyId },
+        types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 192 }],
+      }],
+    });
+    toast('✅ HubSpot task created! ✓', 'success');
+  } catch (e) {
+    toast('Failed to create HubSpot task', 'error');
+  }
+}
+
+async function saveCallNotes(companyId) {
+  const notes = document.getElementById('call-notes-input')?.value;
+  if (!notes) { toast('No notes to save', 'error'); return; }
+  try {
+    await hsPost('/crm/v3/objects/notes', {
+      properties: { hs_note_body: notes, hs_timestamp: Date.now() },
+      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
+    });
+    toast('Notes saved to HubSpot ✓', 'success');
+  } catch {
+    toast('Failed to save notes', 'error');
+  }
+}
+
+function showTranscript(transcript) {
+  document.getElementById('call-logger-content').innerHTML = `
+    <div>
+      <div class="field-label" style="margin-bottom:8px">Full Transcript</div>
+      <div style="background:var(--bg3);border-radius:6px;padding:12px;font-size:12px;color:var(--text2);line-height:1.8;max-height:400px;overflow-y:auto;white-space:pre-wrap">${transcript}</div>
+    </div>`;
+}
+
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
 checkSession();
