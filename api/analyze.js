@@ -40,7 +40,9 @@ Extract and return ONLY a JSON object with these fields:
     });
 
     const analysisData = await analysisRes.json();
-    const analysisText = analysisData.content?.[0]?.text || '{}';
+    if (!analysisRes.ok) throw new Error(`Claude API error: ${analysisData.error?.message || JSON.stringify(analysisData)}`);
+    const analysisText = analysisData.content?.[0]?.text || '';
+    if (!analysisText) throw new Error('Claude returned empty response');
 
     let analysis;
     try {
