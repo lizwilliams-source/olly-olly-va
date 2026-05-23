@@ -1084,7 +1084,7 @@ async function handleAudioUpload(companyId) {
   document.getElementById('call-logger-content').innerHTML = `
     <div style="text-align:center;padding:30px">
       <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 16px"></div>
-      <div id="transcribe-status" style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">Uploading recording...</div>
+      <div id="transcribe-status" style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">Processing...</div>
       <div style="font-size:12px;color:var(--text2)">Long calls can take 10+ min</div>
     </div>`;
 

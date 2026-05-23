@@ -71,8 +71,8 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         summary: title,
         description,
-        start: { dateTime: startTime, timeZone: 'America/New_York' },
-        end: { dateTime: endTime, timeZone: 'America/New_York' },
+        start: { dateTime: startTime },
+        end: { dateTime: endTime },
         reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
       }),
     });

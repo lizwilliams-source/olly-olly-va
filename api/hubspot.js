@@ -6,21 +6,34 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const hsParams = new URLSearchParams();
-    hsParams.append('grant_type', 'refresh_token');
-    hsParams.append('refresh_token', process.env.HUBSPOT_REFRESH_TOKEN);
-    hsParams.append('client_id', process.env.HUBSPOT_CLIENT_ID);
-    hsParams.append('client_secret', process.env.HUBSPOT_CLIENT_SECRET);
+    const KV_URL = process.env.KV_REST_API_URL;
+    const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+    const kvHeaders = { Authorization: `Bearer ${KV_TOKEN}` };
 
-    const tokenRes = await fetch('https://api.hubapi.com/oauth/v1/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: hsParams.toString(),
-    });
-    const tokenData = await tokenRes.json();
-    if (!tokenRes.ok) throw new Error(tokenData.message || 'Token refresh failed');
+    // Use cached token if available (HubSpot tokens last 30 min, we cache for 25)
+    let accessToken;
+    const cachedRes = await fetch(`${KV_URL}/get/hs_access_token`, { headers: kvHeaders });
+    const cachedData = await cachedRes.json();
+    accessToken = cachedData.result;
 
-    const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      const hsParams = new URLSearchParams();
+      hsParams.append('grant_type', 'refresh_token');
+      hsParams.append('refresh_token', process.env.HUBSPOT_REFRESH_TOKEN);
+      hsParams.append('client_id', process.env.HUBSPOT_CLIENT_ID);
+      hsParams.append('client_secret', process.env.HUBSPOT_CLIENT_SECRET);
+
+      const tokenRes = await fetch('https://api.hubapi.com/oauth/v1/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: hsParams.toString(),
+      });
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok) throw new Error(tokenData.message || 'Token refresh failed');
+
+      accessToken = tokenData.access_token;
+      await fetch(`${KV_URL}/set/hs_access_token/${encodeURIComponent(accessToken)}/ex/1500`, { headers: kvHeaders });
+    }
     const hsPath = req.headers['x-hubspot-path'];
     const hsMethod = req.headers['x-hubspot-method'] || req.method;
 
