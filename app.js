@@ -342,7 +342,7 @@ async function renderDashboard() {
         <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
         <div class="ai-chip" onclick="openAIWithPrompt('Give me a coaching tip for my hardest objection today')">Get coaching tip ↗</div>
       </div>`;
-  } catch(e) { document.querySelector('#ai-daily-insight .ai-insight-body').textContent = 'AI briefing unavailable.'; }
+  } catch(e) { const el = document.querySelector('#ai-daily-insight .ai-insight-body'); if (el) el.textContent = 'AI briefing unavailable.'; }
 
   loadDashboardPanels();
 }
