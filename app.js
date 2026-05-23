@@ -1131,7 +1131,9 @@ async function handleAudioUpload(companyId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transcript, companyName: c.name }),
     });
-    const { analysis } = await analysisRes.json();
+    const analysisJson = await analysisRes.json();
+    if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error || JSON.stringify(analysisJson)}`);
+    const { analysis } = analysisJson;
 
     showCallAnalysis(companyId, transcript, analysis);
   } catch (e) {
