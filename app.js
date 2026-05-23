@@ -1096,12 +1096,11 @@ async function handleAudioUpload(companyId) {
     </div>`;
 
   try {
-    // Convert file to base64
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+    // Upload directly to Vercel Blob (bypasses 4.5MB serverless limit)
+    const { upload } = await import('https://esm.sh/@vercel/blob/client');
+    const { url: blobUrl } = await upload(file.name, file, {
+      access: 'public',
+      handleUploadUrl: '/api/upload-audio',
     });
 
     document.getElementById('transcribe-status').textContent = 'Transcribing with Whisper AI...';
@@ -1109,11 +1108,7 @@ async function handleAudioUpload(companyId) {
     const res = await fetch('/api/transcribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        audioBase64: base64,
-        mimeType: file.type,
-        companyName: c.name,
-      }),
+      body: JSON.stringify({ blobUrl, mimeType: file.type, companyName: c.name }),
     });
 
     const data = await res.json();

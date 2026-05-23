@@ -1,3 +1,5 @@
+import { del } from '@vercel/blob';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -5,13 +7,13 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // Get the base64 audio from request
-    const { audioBase64, mimeType, companyName } = req.body;
-    if (!audioBase64) return res.status(400).json({ error: 'No audio provided' });
+    const { blobUrl, mimeType, companyName } = req.body;
+    if (!blobUrl) return res.status(400).json({ error: 'No audio provided' });
 
-    // Convert base64 to buffer
-    const audioBuffer = Buffer.from(audioBase64, 'base64');
-    
+    // Fetch audio from Vercel Blob
+    const audioRes = await fetch(blobUrl);
+    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
     // Send to Whisper API
     const audioBlob = new Blob([audioBuffer], { type: mimeType || 'audio/mpeg' });
     const formData = new FormData();
@@ -75,6 +77,7 @@ Extract and return ONLY a JSON object with these fields:
       analysis = { summary: 'Could not parse analysis', callNotes: transcript };
     }
 
+    await del(blobUrl);
     return res.status(200).json({ transcript, analysis });
   } catch (err) {
     console.error('Transcribe error:', err);
