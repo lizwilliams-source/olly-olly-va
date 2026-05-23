@@ -1108,21 +1108,27 @@ async function handleAudioUpload(companyId) {
       handleUploadUrl: '/api/upload-audio',
     });
 
-    document.getElementById('transcribe-status').textContent = 'Transcribing with Whisper AI...';
+    document.getElementById('transcribe-status').textContent = 'Transcribing... (long calls can take 10+ min)';
 
-    const res = await fetch('/api/transcribe', {
+    const submitRes = await fetch('/api/transcribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blobUrl, mimeType: file.type, companyName: c.name }),
+      body: JSON.stringify({ blobUrl, companyName: c.name }),
     });
+    const submitData = await submitRes.json();
+    if (!submitRes.ok) throw new Error(submitData.error || 'Failed to start transcription');
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Transcription failed');
-
-    document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
-
-    // Show results
-    showCallAnalysis(companyId, data.transcript, data.analysis);
+    const params = new URLSearchParams({ jobId: submitData.jobId, companyName: c.name, blobUrl });
+    while (true) {
+      await new Promise(r => setTimeout(r, 5000));
+      const statusRes = await fetch(`/api/transcribe-status?${params}`);
+      const statusData = await statusRes.json();
+      if (!statusRes.ok) throw new Error(statusData.error || 'Transcription failed');
+      if (statusData.status === 'completed') {
+        showCallAnalysis(companyId, statusData.transcript, statusData.analysis);
+        return;
+      }
+    }
   } catch (e) {
     document.getElementById('call-logger-content').innerHTML = `
       <div style="text-align:center;padding:20px">
