@@ -1108,27 +1108,16 @@ async function handleAudioUpload(companyId) {
       if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadData.error || JSON.stringify(uploadData)}`);
       const { upload_url } = uploadData;
 
-      // Submit transcription job
+      // Transcribe via Groq (server-side)
       document.getElementById('transcribe-status').textContent = 'Transcribing...';
-      const jobRes = await fetch('https://api.assemblyai.com/v2/transcript', {
+      const transcribeRes = await fetch('/api/transcribe', {
         method: 'POST',
-        headers: { 'Authorization': assemblyAiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio_url: upload_url, speech_models: ['universal-2'] }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_url }),
       });
-      const jobData = await jobRes.json();
-      if (!jobRes.ok) throw new Error(`AssemblyAI error: ${jobData.error || JSON.stringify(jobData)}`);
-      const { id: jobId } = jobData;
-
-      // Poll AssemblyAI directly
-      while (true) {
-        await new Promise(r => setTimeout(r, 5000));
-        const statusRes = await fetch(`https://api.assemblyai.com/v2/transcript/${jobId}`, {
-          headers: { 'Authorization': assemblyAiKey },
-        });
-        const statusData = await statusRes.json();
-        if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
-        if (statusData.status === 'completed') { transcript = statusData.text; break; }
-      }
+      const transcribeData = await transcribeRes.json();
+      if (!transcribeRes.ok) throw new Error(`Transcription failed: ${transcribeData.error}`);
+      transcript = transcribeData.transcript;
 
       try { localStorage.setItem(cacheKey, transcript); } catch {}
     }
