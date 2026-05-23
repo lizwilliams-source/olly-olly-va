@@ -960,8 +960,8 @@ async function openContact(id) {
       ${inQueue ? '✓ In Queue' : '+ Add to Queue'}
     </button>
     <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.masterStage || c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
+    <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
     <button class="btn btn-primary btn-sm" onclick="openAIWithPrompt('Give me a call script for ${c.name}. Stage: ${c.masterStage || c.stage}. Include opener, key questions, and objection handling.')">📞 Call script</button>`;
-
   document.getElementById('modal').style.display = 'flex';
 }
 
