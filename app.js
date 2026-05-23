@@ -1097,8 +1097,9 @@ async function handleAudioUpload(companyId) {
       headers: { 'Authorization': assemblyAiKey },
       body: file,
     });
-    if (!uploadRes.ok) throw new Error('Upload failed');
-    const { upload_url } = await uploadRes.json();
+    const uploadData = await uploadRes.json();
+    if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadData.error || JSON.stringify(uploadData)}`);
+    const { upload_url } = uploadData;
 
     // Submit transcription job
     document.getElementById('transcribe-status').textContent = 'Transcribing...';
@@ -1107,8 +1108,9 @@ async function handleAudioUpload(companyId) {
       headers: { 'Authorization': assemblyAiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ audio_url: upload_url, language_code: 'en' }),
     });
-    if (!jobRes.ok) throw new Error('Failed to start transcription');
-    const { id: jobId } = await jobRes.json();
+    const jobData = await jobRes.json();
+    if (!jobRes.ok) throw new Error(`AssemblyAI error: ${jobData.error || JSON.stringify(jobData)}`);
+    const { id: jobId } = jobData;
 
     // Poll AssemblyAI directly
     let transcript;
