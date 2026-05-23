@@ -1106,7 +1106,7 @@ async function handleAudioUpload(companyId) {
     const jobRes = await fetch('https://api.assemblyai.com/v2/transcript', {
       method: 'POST',
       headers: { 'Authorization': assemblyAiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audio_url: upload_url, language_code: 'en' }),
+      body: JSON.stringify({ audio_url: upload_url }),
     });
     const jobData = await jobRes.json();
     if (!jobRes.ok) throw new Error(`AssemblyAI error: ${jobData.error || JSON.stringify(jobData)}`);
