@@ -16,15 +16,18 @@ export default async function handler(req, res) {
 
     // Token generation request from the browser
     if (type === 'blob.generate-client-token') {
-      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      if (!process.env.BLOB_READ_WRITE_TOKEN) {
+        return res.status(500).json({ error: 'BLOB_READ_WRITE_TOKEN is not set' });
+      }
+
+      const host = (req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
       const callbackUrl = `https://${host}/api/upload-audio`;
 
       const clientToken = await generateClientTokenFromReadWriteToken({
         token: process.env.BLOB_READ_WRITE_TOKEN,
         pathname: payload.pathname,
         onUploadCompleted: { callbackUrl },
-        allowedContentTypes: ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/x-m4a', 'audio/ogg'],
-        maximumSizeInBytes: 50 * 1024 * 1024,
+        addRandomSuffix: false,
       });
 
       return res.status(200).json({ type: 'blob.generate-client-token', clientToken });
