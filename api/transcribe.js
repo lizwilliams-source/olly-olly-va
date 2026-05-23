@@ -1,4 +1,4 @@
-export const config = { maxDuration: 60 };
+export const config = { api: { bodyParser: false }, maxDuration: 60 };
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -7,12 +7,9 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const { upload_url } = req.body;
-    if (!upload_url) return res.status(400).json({ error: 'No upload_url provided' });
-
-    const audioRes = await fetch(upload_url);
-    if (!audioRes.ok) throw new Error('Failed to fetch audio from storage');
-    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const audioBuffer = Buffer.concat(chunks);
 
     const formData = new FormData();
     formData.append('file', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'audio.mp3');

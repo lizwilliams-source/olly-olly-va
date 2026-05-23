@@ -1096,28 +1096,24 @@ async function handleAudioUpload(companyId) {
       transcript = cached;
       document.getElementById('transcribe-status').textContent = 'Using cached transcript...';
     } else {
-      const { assemblyAiKey } = await fetch('/api/config').then(r => r.json());
+      const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB — within Vercel's body limit
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      const parts = [];
 
-      // Upload directly to AssemblyAI
-      const uploadRes = await fetch('https://api.assemblyai.com/v2/upload', {
-        method: 'POST',
-        headers: { 'Authorization': assemblyAiKey },
-        body: file,
-      });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadData.error || JSON.stringify(uploadData)}`);
-      const { upload_url } = uploadData;
-
-      // Transcribe via Groq (server-side)
-      document.getElementById('transcribe-status').textContent = 'Transcribing...';
-      const transcribeRes = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_url }),
-      });
-      const transcribeData = await transcribeRes.json();
-      if (!transcribeRes.ok) throw new Error(`Transcription failed: ${transcribeData.error}`);
-      transcript = transcribeData.transcript;
+      for (let i = 0; i < totalChunks; i++) {
+        const chunk = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        document.getElementById('transcribe-status').textContent =
+          totalChunks > 1 ? `Transcribing... (part ${i + 1}/${totalChunks})` : 'Transcribing...';
+        const transcribeRes = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: chunk,
+        });
+        const transcribeData = await transcribeRes.json();
+        if (!transcribeRes.ok) throw new Error(`Transcription failed: ${transcribeData.error}`);
+        parts.push(transcribeData.transcript);
+      }
+      transcript = parts.join(' ');
 
       try { localStorage.setItem(cacheKey, transcript); } catch {}
     }
