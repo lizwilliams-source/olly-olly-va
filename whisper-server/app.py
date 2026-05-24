@@ -16,7 +16,7 @@ model = faster_whisper.WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8
 print("Model ready.")
 
 jobs = {}
-executor = ThreadPoolExecutor(max_workers=1)  # one transcription at a time
+executor = ThreadPoolExecutor(max_workers=2)
 
 def check_auth(request: Request):
     if SECRET_KEY and request.headers.get("Authorization") != f"Bearer {SECRET_KEY}":
