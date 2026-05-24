@@ -97,7 +97,7 @@ function showApp() {
   document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
   if (state.isAdmin) document.getElementById('admin-nav').style.display = 'flex';
   document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => showView(item.dataset.view)); });
-  document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal')) closeModal(); });
+  document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal') && !state.transcribing) closeModal(); });
   init();
 }
 
@@ -1142,6 +1142,7 @@ async function handleAudioUpload(companyId) {
       <div style="font-size:12px;color:var(--text2)">Long calls can take 10+ min</div>
     </div>`;
 
+  state.transcribing = true;
   try {
     const cacheKey = `transcript_${file.name}_${file.size}_${file.lastModified}`;
     let transcript = null;
@@ -1193,8 +1194,10 @@ async function handleAudioUpload(companyId) {
     if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error || JSON.stringify(analysisJson)}`);
     const { analysis } = analysisJson;
 
+    state.transcribing = false;
     showCallAnalysis(companyId, transcript, analysis);
   } catch (e) {
+    state.transcribing = false;
     document.getElementById('call-logger-content').innerHTML = `
       <div style="text-align:center;padding:20px">
         <div style="font-size:36px;margin-bottom:12px">❌</div>
