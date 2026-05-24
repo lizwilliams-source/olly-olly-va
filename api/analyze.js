@@ -55,6 +55,7 @@ Extract and return ONLY a JSON object with these fields:
       logUsage(session.email, {
         claude_input: analysisData.usage.input_tokens || 0,
         claude_output: analysisData.usage.output_tokens || 0,
+        calls: 1,
       }).catch(() => {});
     }
 

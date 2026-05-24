@@ -1150,24 +1150,32 @@ async function handleAudioUpload(companyId) {
       transcript = cached;
       document.getElementById('transcribe-status').textContent = 'Using cached transcript...';
     } else {
-      const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB — within Vercel's body limit
-      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-      const parts = [];
+      // Get whisper server config
+      const { url: whisperUrl, key: whisperKey } = await fetch('/api/transcribe').then(r => r.json());
 
-      for (let i = 0; i < totalChunks; i++) {
-        const chunk = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-        document.getElementById('transcribe-status').textContent =
-          totalChunks > 1 ? `Transcribing... (part ${i + 1}/${totalChunks})` : 'Transcribing...';
-        const transcribeRes = await fetch('/api/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${state.token}` },
-          body: chunk,
+      // Send full file directly to whisper server (no size limit)
+      document.getElementById('transcribe-status').textContent = 'Uploading...';
+      const uploadRes = await fetch(`${whisperUrl}/transcribe`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${whisperKey}`, 'Content-Type': 'application/octet-stream' },
+        body: file,
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadData.detail || uploadData.error}`);
+      const { job_id } = uploadData;
+
+      // Poll for completion
+      document.getElementById('transcribe-status').textContent = 'Transcribing...';
+      while (true) {
+        await new Promise(r => setTimeout(r, 3000));
+        const statusRes = await fetch(`${whisperUrl}/status/${job_id}`, {
+          headers: { 'Authorization': `Bearer ${whisperKey}` },
         });
-        const transcribeData = await transcribeRes.json();
-        if (!transcribeRes.ok) throw new Error(`Transcription failed: ${transcribeData.error}`);
-        parts.push(transcribeData.transcript);
+        const statusData = await statusRes.json();
+        if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
+        if (statusData.status === 'done') { transcript = statusData.transcript; break; }
+        if (statusData.elapsed) document.getElementById('transcribe-status').textContent = `Transcribing... (${statusData.elapsed}s)`;
       }
-      transcript = parts.join(' ');
 
       try { localStorage.setItem(cacheKey, transcript); } catch {}
     }
