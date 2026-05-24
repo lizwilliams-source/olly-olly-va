@@ -1120,7 +1120,7 @@ async function openCallLogger(companyId) {
         <button class="btn btn-primary" style="justify-content:center;width:100%;margin-bottom:8px" onclick="document.getElementById('audio-upload').click()">
           📁 Choose recording file
         </button>
-        <div style="font-size:11px;color:var(--text3)">Supports MP3, MP4, M4A, WAV · ~$0.09 per 15 min call</div>
+        <div style="font-size:11px;color:var(--text3)">Supports MP3, MP4, M4A, WAV</div>
       </div>
     </div>`;
 
@@ -1136,10 +1136,12 @@ async function handleAudioUpload(companyId) {
   if (!file) return;
 
   document.getElementById('call-logger-content').innerHTML = `
-    <div style="text-align:center;padding:30px">
-      <div class="spinner" style="width:32px;height:32px;border-width:3px;margin:0 auto 16px"></div>
-      <div id="transcribe-status" style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">Processing...</div>
-      <div style="font-size:12px;color:var(--text2)">Long calls can take 10+ min</div>
+    <div style="padding:24px 8px">
+      <div id="transcribe-status" style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;text-align:center">Processing...</div>
+      <div style="background:var(--bg3);border-radius:99px;height:8px;overflow:hidden">
+        <div id="transcribe-bar" style="height:100%;width:0%;background:var(--blue);border-radius:99px;transition:width 0.4s ease"></div>
+      </div>
+      <div id="transcribe-elapsed" style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px">0s</div>
     </div>`;
 
   state.transcribing = true;
@@ -1156,6 +1158,8 @@ async function handleAudioUpload(companyId) {
 
       // Send full file directly to whisper server (no size limit)
       document.getElementById('transcribe-status').textContent = 'Uploading...';
+      const uploadBar = document.getElementById('transcribe-bar');
+      if (uploadBar) uploadBar.style.width = '5%';
       const uploadRes = await fetch(`${whisperUrl}/transcribe`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${whisperKey}`, 'Content-Type': 'application/octet-stream' },
@@ -1167,6 +1171,8 @@ async function handleAudioUpload(companyId) {
 
       // Poll for completion
       document.getElementById('transcribe-status').textContent = 'Transcribing...';
+      const transcribeBarInit = document.getElementById('transcribe-bar');
+      if (transcribeBarInit) transcribeBarInit.style.width = '10%';
       const transcribeStart = Date.now();
       while (true) {
         await new Promise(r => setTimeout(r, 3000));
@@ -1177,13 +1183,19 @@ async function handleAudioUpload(companyId) {
         if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
         if (statusData.status === 'done') { transcript = statusData.transcript; break; }
         const elapsed = Math.round((Date.now() - transcribeStart) / 1000);
-        document.getElementById('transcribe-status').textContent = `Transcribing... (${elapsed}s)`;
+        const progress = Math.min(90, (elapsed / 180) * 90);
+        const bar = document.getElementById('transcribe-bar');
+        const elapsedEl = document.getElementById('transcribe-elapsed');
+        if (bar) bar.style.width = `${progress}%`;
+        if (elapsedEl) elapsedEl.textContent = `${elapsed}s`;
       }
 
       try { localStorage.setItem(cacheKey, transcript); } catch {}
     }
 
     // Analyze with Claude
+    const bar = document.getElementById('transcribe-bar');
+    if (bar) bar.style.width = '100%';
     document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
     const analysisRes = await fetch('/api/analyze', {
       method: 'POST',
