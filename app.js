@@ -1166,6 +1166,7 @@ async function handleAudioUpload(companyId) {
 
       // Poll for completion
       document.getElementById('transcribe-status').textContent = 'Transcribing...';
+      const transcribeStart = Date.now();
       while (true) {
         await new Promise(r => setTimeout(r, 3000));
         const statusRes = await fetch(`${whisperUrl}/status/${job_id}`, {
@@ -1174,7 +1175,8 @@ async function handleAudioUpload(companyId) {
         const statusData = await statusRes.json();
         if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
         if (statusData.status === 'done') { transcript = statusData.transcript; break; }
-        if (statusData.elapsed) document.getElementById('transcribe-status').textContent = `Transcribing... (${statusData.elapsed}s)`;
+        const elapsed = Math.round((Date.now() - transcribeStart) / 1000);
+        document.getElementById('transcribe-status').textContent = `Transcribing... (${elapsed}s)`;
       }
 
       try { localStorage.setItem(cacheKey, transcript); } catch {}
