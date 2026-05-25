@@ -13,6 +13,7 @@ const state = {
   token: null,
   isAdmin: false,
   queue: [],
+  pipeline: [],
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
@@ -268,6 +269,7 @@ function showView(view) {
     dashboard: renderDashboard,
     contacts: renderContacts,
     myqueue: renderMyQueue,
+    pipeline: renderPipeline,
     ai: renderAI,
     coaching: renderCoaching,
     admin: renderAdmin,
@@ -506,6 +508,104 @@ async function clearQueue() {
   const badge = document.getElementById('badge-queue');
   if (badge) badge.textContent = 0;
   renderMyQueue();
+}
+
+// ── PIPELINE ──────────────────────────────────────────────────────────────────
+async function loadPipeline() {
+  try {
+    const res = await fetch('/api/pipeline', { headers: { Authorization: `Bearer ${state.token}` } });
+    if (!res.ok) return;
+    const { pipeline } = await res.json();
+    state.pipeline = pipeline || [];
+    const badge = document.getElementById('badge-pipeline');
+    if (badge) badge.textContent = state.pipeline.length;
+  } catch {}
+}
+
+async function addToPipeline(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  if (!c) return;
+  const res = await fetch('/api/pipeline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ action: 'add', companyId, companyName: c.name }),
+  });
+  const { pipeline } = await res.json();
+  state.pipeline = pipeline;
+  const badge = document.getElementById('badge-pipeline');
+  if (badge) badge.textContent = state.pipeline.length;
+  toast(`${c.name} added to pipeline ✓`, 'success');
+}
+
+async function removeFromPipeline(companyId) {
+  const res = await fetch('/api/pipeline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ action: 'remove', companyId }),
+  });
+  const { pipeline } = await res.json();
+  state.pipeline = pipeline;
+  const badge = document.getElementById('badge-pipeline');
+  if (badge) badge.textContent = state.pipeline.length;
+  if (state.currentView === 'pipeline') renderPipeline();
+}
+
+async function updatePipelineStatus(companyId, status) {
+  const res = await fetch('/api/pipeline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ action: 'update', companyId, status }),
+  });
+  const { pipeline } = await res.json();
+  state.pipeline = pipeline;
+}
+
+const PIPELINE_STATUSES = {
+  hot_lead:       { label: 'Hot Lead',       color: 'var(--red)',    bg: 'rgba(240,82,82,.15)' },
+  following_up:   { label: 'Following Up',   color: 'var(--amber)',  bg: 'rgba(245,166,35,.15)' },
+  contacted:      { label: 'Contacted',      color: 'var(--blue)',   bg: 'rgba(79,142,247,.15)' },
+  proposal_sent:  { label: 'Proposal Sent',  color: 'var(--purple)', bg: 'rgba(167,139,250,.15)' },
+  closed:         { label: 'Closed',         color: 'var(--green)',  bg: 'rgba(62,207,142,.15)' },
+};
+
+async function renderPipeline() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-left">
+        <h2>📌 Pipeline</h2>
+        <p>${state.pipeline.length} companies being tracked</p>
+      </div>
+    </div>
+    <div class="content">
+      ${state.pipeline.length === 0
+        ? `<div class="empty-state" style="text-align:center;padding:60px 20px;color:var(--text2)">
+            <div style="font-size:40px;margin-bottom:12px">📌</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">No companies in pipeline</div>
+            <div style="font-size:13px">Open any company and click "Add to Pipeline" to start tracking it.</div>
+           </div>`
+        : `<div class="lead-list">
+            ${state.pipeline.map(p => {
+              const s = PIPELINE_STATUSES[p.status] || PIPELINE_STATUSES.following_up;
+              const daysIn = Math.floor((Date.now() - new Date(p.addedAt)) / 86400000);
+              const contact = state.contacts.find(c => c.id === p.companyId);
+              const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${p.companyId}`;
+              return `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius)">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                    <span style="cursor:pointer;text-decoration:underline;text-underline-offset:3px" onclick="openCompany('${p.companyId}')">${p.companyName}</span>
+                    <a href="${hsUrl}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
+                  </div>
+                  <div style="font-size:11px;color:var(--text2);margin-top:3px">${daysIn === 0 ? 'Added today' : `${daysIn} day${daysIn === 1 ? '' : 's'} in pipeline`}${contact ? ` · Last contact: ${contact.lastContacted}` : ''}</div>
+                </div>
+                <select onchange="updatePipelineStatus('${p.companyId}', this.value)" style="font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:${s.bg};color:${s.color};cursor:pointer">
+                  ${Object.entries(PIPELINE_STATUSES).map(([k, v]) => `<option value="${k}" ${p.status === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+                </select>
+                <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3);flex-shrink:0" onclick="removeFromPipeline('${p.companyId}')">Remove</button>
+              </div>`;
+            }).join('')}
+           </div>`}
+    </div>`;
 }
 
 // ── PRIORITY VIEWS ────────────────────────────────────────────────────────────
@@ -1008,10 +1108,14 @@ async function openContact(id) {
       </div>
     </div>`;
 
+  const inPipeline = state.pipeline.find(p => p.companyId === id);
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
     <button class="btn btn-sm ${inQueue ? 'btn-primary' : ''}" onclick="${inQueue ? `removeFromQueue('${id}')` : `addToQueue('${id}')`}; closeModal()">
       ${inQueue ? '✓ In Queue' : '+ Add to Queue'}
+    </button>
+    <button class="btn btn-sm ${inPipeline ? '' : ''}" style="${inPipeline ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="${inPipeline ? `removeFromPipeline('${id}')` : `addToPipeline('${id}')`}; closeModal()">
+      ${inPipeline ? '📌 In Pipeline' : '📌 Pipeline'}
     </button>
     <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.masterStage || c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
     <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
@@ -1061,7 +1165,7 @@ let refreshInterval = null;
 
 async function init() {
   showView('dashboard');
-  await Promise.all([loadContacts(), loadQueue()]);
+  await Promise.all([loadContacts(), loadQueue(), loadPipeline()]);
   if (state.currentView === 'dashboard') showView('dashboard');
   startAutoRefresh();
 }
