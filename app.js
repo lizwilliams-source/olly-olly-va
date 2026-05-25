@@ -274,14 +274,20 @@ function enrichContact(raw) {
   const urgency = score >= 80 ? 'urgent' : score >= 60 ? 'warm' : score >= 40 ? 'cool' : 'new';
   const name = p.name || 'Unknown Company';
   const initials = name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const masterStage = p.subscription_status || '';
+  const followUpStages = ['Demo Set', 'Demo Completed', 'Contract Sent', 'Contract Revision'];
+  const isFollowUp = followUpStages.includes(masterStage) && daysSince > 3 && !p.notes_next_activity_date;
+  const isRoeRisk = p.dnr !== 'Yes' && (daysSince > 14);
+  const lastCallerWasMe = p.recent_user_to_call && p.recent_user_to_call === (p.hubspot_owner_id || '');
   return {
     id: raw.id, name, phone: p.phone || '', city: p.city || '', state: p.state || '',
     website: p.website || '', industry: p.industry || '', timezone: p['timezone_'] || '',
     leadSource: p.lead_source || '', stage: p.lifecyclestage || p.hs_lead_status || 'lead',
-    masterStage: p.subscription_status || '', ownerId: p.hubspot_owner_id || '',
+    masterStage, ownerId: p.hubspot_owner_id || '',
     daysSince, lastContacted: lastContactedMs ? new Date(lastContactedMs).toLocaleDateString() : 'Never',
     score, urgency, initials, avatarColor: avatarColor(raw.id),
     needsCall: daysSince > 7 || !lastContactedMs, createdAt: p.createdate,
+    isFollowUp, isRoeRisk, lastCallerWasMe,
   };
 }
 
@@ -319,9 +325,13 @@ function updateBadges() {
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
 async function askAI(userMsg, extraContext = '') {
-  const contactSummary = state.contacts.map(c =>
-    `${c.name} (score ${c.score}, last contact: ${c.lastContacted}, stage: ${c.masterStage || c.stage}, location: ${c.city} ${c.state}, timezone: ${c.timezone}, lead source: ${c.leadSource})`
-  ).join('\n');
+  const contactSummary = state.contacts.map(c => {
+    const flags = [
+      c.isFollowUp ? 'FOLLOW-UP NEEDED' : '',
+      c.isRoeRisk ? 'ROE RISK' : '',
+    ].filter(Boolean).join(', ');
+    return `${c.name} | stage: ${c.masterStage || c.stage} | last contact: ${c.lastContacted} (${c.daysSince === 999 ? 'never' : c.daysSince + 'd ago'}) | ${flags ? 'PRIORITY: ' + flags : 'no priority flags'} | timezone: ${c.timezone} | lead source: ${c.leadSource}`;
+  }).join('\n');
   const system = `You are the Olly Olly Virtual Assistant — a smart pipeline management assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.\n\nTheir assigned companies:\n${contactSummary}\n\n${extraContext}\n\nBe concise, friendly, and specific. When drafting emails, write the full email with subject line.`;
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
   const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ max_tokens: 2000, system, messages }) });
@@ -1245,9 +1255,10 @@ async function init() {
 }
 
 async function loadDailyBriefing() {
-  if (state.dailyBriefing || !state.contacts.length) return;
+  if (state.dailyBriefingLoaded || !state.contacts.length) return;
+  state.dailyBriefingLoaded = true;
   try {
-    const insight = await askAI(`Give me a 2-3 sentence morning briefing for my pipeline. Which of my assigned companies should I prioritize today and why? Be specific with company names. Always write complete sentences — never cut off mid-sentence.`, `Today's date: ${new Date().toLocaleDateString()}`);
+    const insight = await askAI(`Give me a morning briefing for my pipeline. Prioritize companies in this order: 1) FOLLOW-UP NEEDED (active deals that need attention), 2) ROE RISK (haven't been called in 14+ days), 3) anything else urgent. List the top 3-5 companies I should call today by name and briefly say why each one is a priority. Write in complete sentences.`, `Today's date: ${new Date().toLocaleDateString()}`);
     state.dailyBriefing = insight;
   } catch(e) { state.dailyBriefing = `AI briefing unavailable: ${e.message}`; }
   if (state.currentView === 'dashboard') {
