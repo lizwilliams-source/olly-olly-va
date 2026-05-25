@@ -281,6 +281,9 @@ function enrichContact(raw) {
   const isRoeRisk = p.dnr !== 'Yes' && (daysSince > 14);
   const lastCallerWasMe = p.recent_user_to_call && p.recent_user_to_call === (p.hubspot_owner_id || '');
   const isDmConnected = lastCallerWasMe && (p.most_recent_call_outcome || '').toLowerCase().includes('dm connected');
+  const isDnr = p.dnr === 'Yes';
+  const isNeverCalledByMe = !lastCallerWasMe;
+  const hasFutureActivityDate = !!p.notes_next_activity_date && new Date(p.notes_next_activity_date) > new Date();
   return {
     id: raw.id, name, phone: p.phone || '', city: p.city || '', state: p.state || '',
     website: p.website || '', industry: p.industry || '', timezone: p['timezone_'] || '',
@@ -289,7 +292,7 @@ function enrichContact(raw) {
     daysSince, lastContacted: lastContactedMs ? new Date(lastContactedMs).toLocaleDateString() : 'Never',
     score, urgency, initials, avatarColor: avatarColor(raw.id),
     needsCall: daysSince > 7 || !lastContactedMs, createdAt: p.createdate,
-    isFollowUp, isRoeRisk, isDmConnected,
+    isFollowUp, isRoeRisk, isDmConnected, isDnr, isNeverCalledByMe, hasFutureActivityDate,
   };
 }
 
@@ -1260,10 +1263,72 @@ async function init() {
 async function loadDailyBriefing() {
   if (state.dailyBriefingLoaded || !state.contacts.length) return;
   state.dailyBriefingLoaded = true;
+
+  const pipelineIds = new Set(state.pipeline.map(p => p.companyId));
+  const noScheduled = c => !c.hasFutureActivityDate;
+
+  const followUps     = state.contacts.filter(c => c.isFollowUp && noScheduled(c));
+  const pipelineOverdue = state.contacts.filter(c => pipelineIds.has(c.id) && !c.isFollowUp && noScheduled(c));
+  const roeRisk       = state.contacts.filter(c => c.isRoeRisk && !c.isFollowUp && !pipelineIds.has(c.id) && noScheduled(c));
+  const neverCalled   = state.contacts.filter(c => c.isNeverCalledByMe && !c.isDnr && !c.isFollowUp && noScheduled(c));
+  const dnrStale      = state.contacts.filter(c => c.isDnr && c.daysSince > 30 && noScheduled(c));
+
+  function fmtBucket(label, companies, max = 5) {
+    if (!companies.length) return '';
+    const items = companies.slice(0, max).map(c =>
+      `  - ${c.name} (${c.daysSince === 999 ? 'never contacted' : c.daysSince + 'd since last contact'}, stage: ${c.masterStage || c.stage})`
+    ).join('\n');
+    return `${label} (${companies.length} total):\n${items}`;
+  }
+
+  const companyContext = [
+    fmtBucket('1. FOLLOW-UPS — active deals needing attention', followUps),
+    fmtBucket('2. PIPELINE — overdue check-in, no upcoming activity scheduled', pipelineOverdue),
+    fmtBucket('3. ROE RISK — 14+ days without contact', roeRisk),
+    fmtBucket('4. NEVER CALLED BY ME', neverCalled),
+    fmtBucket('5. DO NOT RECIRCULATE — stale (30+ days no contact)', dnrStale),
+  ].filter(Boolean).join('\n\n');
+
+  let calendarContext = '';
   try {
-    const insight = await askAI(`Give me a morning briefing for my pipeline. Prioritize companies in this order: 1) FOLLOW-UP NEEDED (active deals needing attention), 2) DM CONNECTED (I spoke with the decision maker — need to follow up), 3) ROE RISK (haven't been called in 14+ days), 4) anything else urgent. List the top 3-5 companies I should call today by name and briefly say why each one is a priority. Write in complete sentences.`, `Today's date: ${new Date().toLocaleDateString()}`);
-    state.dailyBriefing = insight;
-  } catch(e) { state.dailyBriefing = `AI briefing unavailable: ${e.message}`; }
+    const calRes = await fetch('/api/calendar?action=events', { headers: { Authorization: `Bearer ${state.token}` } });
+    const calData = await calRes.json();
+    if (calData.events?.length) {
+      const eventList = calData.events.map(e => {
+        const start = e.start?.dateTime
+          ? new Date(e.start.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+          : 'All day';
+        const end = e.end?.dateTime
+          ? new Date(e.end.dateTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+          : '';
+        return `  - ${e.summary || 'Busy'}: ${start}${end ? '–' + end : ''}`;
+      }).join('\n');
+      calendarContext = `\n\nToday's calendar:\n${eventList}`;
+    } else {
+      calendarContext = '\n\nCalendar: No events scheduled today.';
+    }
+  } catch {}
+
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const prompt = `Write a morning briefing for ${state.user?.name || 'me'}. Today is ${today}.\n\nCompanies to prioritize today:\n${companyContext || 'No flagged companies at the moment.'}${calendarContext}\n\nPlease:\n1. Name the 3–5 most important companies to call today and briefly explain why each is a priority (1 sentence each), in priority order.\n2. Summarize today's calendar in 1–2 sentences.\n3. Suggest 1–2 specific call blocks based on open time today.\n\nBe friendly and direct. Write in complete sentences.`;
+
+  try {
+    const res = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({
+        system: 'You are a concise, actionable sales assistant for an SEO agency. Help the rep prioritize their day.',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 2000,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `AI error: ${res.status}`);
+    state.dailyBriefing = data.content?.[0]?.text || 'Briefing unavailable.';
+  } catch(e) {
+    state.dailyBriefing = `AI briefing unavailable: ${e.message}`;
+  }
+
   if (state.currentView === 'dashboard') {
     const el = document.querySelector('#ai-daily-insight .ai-insight-body');
     if (el) el.innerHTML = state.dailyBriefing.replace(/\n/g,'<br>') +

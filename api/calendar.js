@@ -82,5 +82,65 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, eventId: eventData.id, eventLink: eventData.htmlLink });
   }
 
+  // ── LIST TODAY'S EVENTS ────────────────────────────────────────────────────
+  if (action === 'events') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+
+    const KV_URL = process.env.KV_REST_API_URL;
+    const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+
+    const sessionRes = await fetch(`${KV_URL}/get/${encodeURIComponent(`session:${token}`)}`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    });
+    const sessionData = await sessionRes.json();
+    const session = sessionData.result ? JSON.parse(sessionData.result) : null;
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+
+    const gTokenRes = await fetch(`${KV_URL}/get/${encodeURIComponent(`gtoken:${session.email}`)}`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    });
+    const gTokenData = await gTokenRes.json();
+    const gTokens = gTokenData.result ? JSON.parse(gTokenData.result) : null;
+    if (!gTokens) return res.status(200).json({ events: [], notConnected: true });
+
+    const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        refresh_token: gTokens.refresh_token,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const refreshData = await refreshRes.json();
+    const accessToken = refreshData.access_token;
+    if (!accessToken) return res.status(200).json({ events: [], notConnected: true });
+
+    const now = new Date();
+    const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
+
+    const params = new URLSearchParams({
+      timeMin: startOfDay.toISOString(),
+      timeMax: endOfDay.toISOString(),
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '20',
+    });
+    const eventsRes = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const eventsData = await eventsRes.json();
+    if (!eventsRes.ok) return res.status(200).json({ events: [] });
+
+    const events = (eventsData.items || []).map(e => ({
+      summary: e.summary || '',
+      start: e.start,
+      end: e.end,
+    }));
+    return res.status(200).json({ events });
+  }
+
   return res.status(400).json({ error: 'Unknown action' });
 }
