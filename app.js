@@ -325,7 +325,7 @@ async function askAI(userMsg, extraContext = '') {
   const system = `You are the Olly Olly Virtual Assistant — a smart pipeline management assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.\n\nTheir current companies (top 20):\n${contactSummary}\n\n${extraContext}\n\nBe concise, friendly, and specific. When drafting emails, write the full email with subject line.`;
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
   const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ max_tokens: 1000, system, messages }) });
-  if (!res.ok) throw new Error(`AI API error: ${res.status}`);
+  if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || `AI API error: ${res.status}`); }
   const data = await res.json();
   if (data.error) throw new Error(JSON.stringify(data.error));
   const reply = data.content?.map(b => b.text || '').join('') || 'Sorry, something went wrong.';
