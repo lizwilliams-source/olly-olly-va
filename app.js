@@ -18,6 +18,7 @@ const state = {
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
+  contactsSort: 'score',
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -348,7 +349,7 @@ function showView(view) {
     nevercalled: () => renderPriorityView('nevercalled', '📵 Never Called By Me'),
     roerisklist: () => renderPriorityView('roerisklist', '⚠️ ROE Risk'),
     followuplist: () => renderPriorityView('followuplist', '🔔 Follow-ups'),
-    dnrlist: () => renderPriorityView('dnrlist', '🚫 DNR'),
+    dnrlist: () => renderPriorityView('dnrlist', '💾 Do Not Recirculate'),
   };
   document.getElementById('main').innerHTML = '';
   (views[view] || renderDashboard)();
@@ -372,13 +373,6 @@ async function renderDashboard() {
       </div>
     </div>
     <div class="content">
-      <div class="metrics-grid">
-        <div class="metric-card blue"><div class="metric-label">My Companies</div><div class="metric-value">${state.contacts.length}</div><div class="metric-sub">Assigned to me</div></div>
-        <div class="metric-card red"><div class="metric-label">Calls Needed</div><div class="metric-value">${callNeeded}</div><div class="metric-sub">Haven't called in 7+ days</div></div>
-        <div class="metric-card amber"><div class="metric-label">Follow-ups Due</div><div class="metric-value">${followNeeded}</div><div class="metric-sub">5+ days since contact</div></div>
-        <div class="metric-card green"><div class="metric-label">Hot Leads</div><div class="metric-value">${hot}</div><div class="metric-sub">Score 80+</div></div>
-      </div>
-
       <div id="ai-daily-insight" class="ai-insight">
         <div class="ai-insight-header"><div class="ai-insight-icon">✨</div><div class="ai-insight-title">AI Daily Briefing</div></div>
         <div class="ai-insight-body"><span class="spinner"></span> Analyzing your companies...</div>
@@ -400,10 +394,10 @@ async function renderDashboard() {
           <div class="metric-value" id="count-followup" style="color:var(--blue)">...</div>
           <div class="metric-sub">Active deals →</div>
         </div>
-        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--text3)" onclick="showView('dnrlist')">
-          <div class="metric-label">🚫 DNR</div>
-          <div class="metric-value" id="count-dnr" style="color:var(--text3)">...</div>
-          <div class="metric-sub">Do not reach out →</div>
+        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--green)" onclick="showView('dnrlist')">
+          <div class="metric-label">💾 Do Not Recirculate</div>
+          <div class="metric-value" id="count-dnr" style="color:var(--green)">...</div>
+          <div class="metric-sub">Saved in your name →</div>
         </div>
       </div>
     </div>`;
@@ -448,8 +442,23 @@ async function loadDashboardPanels() {
 }
 
 // ── MY COMPANIES ──────────────────────────────────────────────────────────────
+function sortContacts(contacts) {
+  const s = state.contactsSort || 'score';
+  return [...contacts].sort((a, b) => {
+    if (s === 'timezone') return (a.timezone || 'zzz').localeCompare(b.timezone || 'zzz');
+    if (s === 'leadsource') return (a.leadSource || 'zzz').localeCompare(b.leadSource || 'zzz');
+    return b.score - a.score;
+  });
+}
+
+function setContactsSort(val) {
+  state.contactsSort = val;
+  state.contactsPage = 0;
+  renderContacts();
+}
+
 function renderContacts() {
-  const sorted = [...state.contacts].sort((a, b) => b.score - a.score);
+  const sorted = sortContacts(state.contacts);
   const pageSize = state.contactsPageSize || 50;
   const page = state.contactsPage || 0;
   const paginated = sorted.slice(page * pageSize, (page + 1) * pageSize);
@@ -460,15 +469,20 @@ function renderContacts() {
       <div class="topbar-left"><h2>🏢 My Companies</h2><p>${sorted.length} companies assigned to you</p></div>
       <div class="topbar-right">
         <input id="contact-search" placeholder="Search companies..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:200px" oninput="filterContacts(this.value)" />
-        <span style="font-size:12px;color:var(--text2);margin-left:8px">Per page:</span>
+        <select onchange="setContactsSort(this.value)" style="font-size:12px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer">
+          <option value="score" ${state.contactsSort==='score'?'selected':''}>Sort: AI Score</option>
+          <option value="timezone" ${state.contactsSort==='timezone'?'selected':''}>Sort: Timezone</option>
+          <option value="leadsource" ${state.contactsSort==='leadsource'?'selected':''}>Sort: Lead Source</option>
+        </select>
+        <span style="font-size:12px;color:var(--text2);margin-left:4px">Per page:</span>
         ${[25,50,100].map(n => `<button class="btn btn-sm ${pageSize===n?'btn-primary':''}" onclick="setContactsPageSize(${n})">${n}</button>`).join('')}
       </div>
     </div>
     <div class="content">
       <div style="display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Company</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Timezone</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Lead Source</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;cursor:pointer" onclick="setContactsSort('score')">Company ${state.contactsSort==='score'?'↓':''}</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;cursor:pointer" onclick="setContactsSort('timezone')">Timezone ${state.contactsSort==='timezone'?'↓':''}</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;cursor:pointer" onclick="setContactsSort('leadsource')">Lead Source ${state.contactsSort==='leadsource'?'↓':''}</div>
         <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em"></div>
       </div>
       <div class="lead-list" id="contact-list">${paginated.map(leadCardHTML).join('')}</div>
