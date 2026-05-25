@@ -402,14 +402,18 @@ async function renderDashboard() {
       </div>
     </div>`;
 
-  try {
-    const insight = await askAI(`Give me a sharp 2-sentence morning briefing: which of my companies should I prioritize today and why? Be specific with names.`, `Today's date: ${new Date().toLocaleDateString()}`);
-    document.querySelector('#ai-daily-insight .ai-insight-body').innerHTML = insight.replace(/\n/g,'<br>') +
-      `<div class="ai-chips">
-        <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
-        <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
-      </div>`;
-  } catch(e) { const el = document.querySelector('#ai-daily-insight .ai-insight-body'); if (el) el.textContent = `AI briefing unavailable: ${e.message}`; }
+  if (!state.dailyBriefing) {
+    try {
+      const insight = await askAI(`Give me a sharp 2-sentence morning briefing: which of my companies should I prioritize today and why? Be specific with names.`, `Today's date: ${new Date().toLocaleDateString()}`);
+      state.dailyBriefing = insight;
+    } catch(e) { state.dailyBriefing = `AI briefing unavailable: ${e.message}`; }
+  }
+  const el = document.querySelector('#ai-daily-insight .ai-insight-body');
+  if (el) el.innerHTML = state.dailyBriefing.replace(/\n/g,'<br>') +
+    `<div class="ai-chips">
+      <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
+      <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
+    </div>`;
 
   loadDashboardPanels();
 }
