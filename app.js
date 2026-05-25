@@ -996,20 +996,27 @@ async function loadUsageDashboard(month) {
   const res = await fetch(`/api/usage?month=${month}`, { headers: { Authorization: `Bearer ${state.token}` } });
   const { rows } = await res.json();
   if (!rows?.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px">No usage data for this month yet.</div>'; return; }
-  const fmt = n => `$${n.toFixed(4)}`;
+  const fmt = n => n < 0.01 ? `<$0.01` : `$${n.toFixed(2)}`;
+  const fmtTokens = n => n >= 1_000_000 ? `${(n/1_000_000).toFixed(2)}M` : n >= 1000 ? `${(n/1000).toFixed(1)}k` : `${n}`;
   const fmtMin = s => s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`;
-  const total = rows.reduce((a, r) => ({ groq: a.groq + r.groq_cost, claude: a.claude + r.claude_cost, total: a.total + r.total_cost }), { groq: 0, claude: 0, total: 0 });
+  const totals = rows.reduce((a, r) => ({
+    calls: a.calls + r.calls,
+    ai_queries: a.ai_queries + r.ai_queries,
+    gemini_input: a.gemini_input + r.gemini_input,
+    gemini_output: a.gemini_output + r.gemini_output,
+    gemini_cost: a.gemini_cost + r.gemini_cost,
+  }), { calls: 0, ai_queries: 0, gemini_input: 0, gemini_output: 0, gemini_cost: 0 });
   el.innerHTML = `
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Transcription via Whisper (flat-rate VPS). AI via Gemini 2.5 Flash ($0.15/$0.60 per 1M tokens).</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead>
         <tr style="color:var(--text3);text-align:left;border-bottom:1px solid var(--border)">
           <th style="padding:6px 8px">Rep</th>
-          <th style="padding:6px 8px;text-align:center">Calls</th>
+          <th style="padding:6px 8px;text-align:center">Calls Transcribed</th>
           <th style="padding:6px 8px;text-align:center">AI Queries</th>
-          <th style="padding:6px 8px;text-align:right">Groq (audio)</th>
-          <th style="padding:6px 8px;text-align:right">Groq cost</th>
-          <th style="padding:6px 8px;text-align:right">Claude cost</th>
-          <th style="padding:6px 8px;text-align:right">Total</th>
+          <th style="padding:6px 8px;text-align:right">Whisper Audio</th>
+          <th style="padding:6px 8px;text-align:right">Gemini Tokens</th>
+          <th style="padding:6px 8px;text-align:right">Gemini Cost</th>
         </tr>
       </thead>
       <tbody>
@@ -1018,16 +1025,17 @@ async function loadUsageDashboard(month) {
             <td style="padding:8px"><div style="font-weight:500;color:var(--text)">${r.name}</div><div style="color:var(--text3);font-size:11px">${r.email}</div></td>
             <td style="padding:8px;text-align:center;color:var(--text2)">${r.calls}</td>
             <td style="padding:8px;text-align:center;color:var(--text2)">${r.ai_queries}</td>
-            <td style="padding:8px;text-align:right;color:var(--text2)">${fmtMin(r.groq_seconds)}</td>
-            <td style="padding:8px;text-align:right;color:var(--text2)">${fmt(r.groq_cost)}</td>
-            <td style="padding:8px;text-align:right;color:var(--text2)">${fmt(r.claude_cost)}</td>
-            <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(r.total_cost)}</td>
+            <td style="padding:8px;text-align:right;color:var(--text2)">${fmtMin(r.whisper_seconds)}</td>
+            <td style="padding:8px;text-align:right;color:var(--text2)">${fmtTokens(r.gemini_input + r.gemini_output)}</td>
+            <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(r.gemini_cost)}</td>
           </tr>`).join('')}
         <tr style="border-top:2px solid var(--border)">
-          <td style="padding:8px;font-weight:600;color:var(--text)" colspan="4">Total</td>
-          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(total.groq)}</td>
-          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(total.claude)}</td>
-          <td style="padding:8px;text-align:right;font-weight:600;color:var(--green)">${fmt(total.total)}</td>
+          <td style="padding:8px;font-weight:600;color:var(--text)">Total</td>
+          <td style="padding:8px;text-align:center;font-weight:600;color:var(--text)">${totals.calls}</td>
+          <td style="padding:8px;text-align:center;font-weight:600;color:var(--text)">${totals.ai_queries}</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">—</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmtTokens(totals.gemini_input + totals.gemini_output)}</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--green)">${fmt(totals.gemini_cost)}</td>
         </tr>
       </tbody>
     </table>`;
@@ -1063,7 +1071,7 @@ async function renderAdmin() {
       </div>
       <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:8px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div class="section-title">API Usage & Cost</div>
+          <div class="section-title">Usage & Gemini Cost</div>
           <input type="month" id="usage-month" value="${currentMonth}" onchange="loadUsageDashboard(this.value)"
             style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none" />
         </div>

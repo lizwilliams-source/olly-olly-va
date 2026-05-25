@@ -29,23 +29,22 @@ export default async function handler(req, res) {
     const usageRes = await fetch(`${KV_URL}/get/${encodeURIComponent(`usage:${u.email}:${month}`)}`, { headers });
     const usage = await usageRes.json().then(d => d.result ? JSON.parse(d.result) : {});
 
-    const groq_seconds = usage.groq_seconds || 0;
-    const claude_input = usage.claude_input || 0;
-    const claude_output = usage.claude_output || 0;
-    const groq_cost = (groq_seconds / 3600) * 0.04;
-    const claude_cost = (claude_input / 1_000_000) * 0.80 + (claude_output / 1_000_000) * 4.00;
+    const whisper_seconds = usage.groq_seconds || 0; // stored as groq_seconds (legacy key)
+    const gemini_input = usage.claude_input || 0;     // stored as claude_input (legacy key)
+    const gemini_output = usage.claude_output || 0;   // stored as claude_output (legacy key)
+    // Gemini 2.5 Flash pricing: $0.15/M input, $0.60/M output
+    const gemini_cost = (gemini_input / 1_000_000) * 0.15 + (gemini_output / 1_000_000) * 0.60;
 
     return {
       name: u.name,
       email: u.email,
       calls: usage.calls || 0,
       ai_queries: usage.ai_queries || 0,
-      groq_seconds: Math.round(groq_seconds),
-      claude_input,
-      claude_output,
-      groq_cost,
-      claude_cost,
-      total_cost: groq_cost + claude_cost,
+      whisper_seconds: Math.round(whisper_seconds),
+      gemini_input,
+      gemini_output,
+      gemini_cost,
+      total_cost: gemini_cost, // VPS is flat-rate, only Gemini has per-use cost
     };
   }));
 
