@@ -18,7 +18,8 @@ const state = {
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
-  contactsSort: 'score',
+  contactsFilterTimezone: '',
+  contactsFilterLeadSource: '',
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -440,37 +441,42 @@ async function loadDashboardPanels() {
 }
 
 // ── MY COMPANIES ──────────────────────────────────────────────────────────────
-function sortContacts(contacts) {
-  const s = state.contactsSort || 'score';
-  return [...contacts].sort((a, b) => {
-    if (s === 'timezone') return (a.timezone || 'zzz').localeCompare(b.timezone || 'zzz');
-    if (s === 'leadsource') return (a.leadSource || 'zzz').localeCompare(b.leadSource || 'zzz');
-    return b.score - a.score;
-  });
+function getFilteredContacts() {
+  return [...state.contacts]
+    .filter(c => !state.contactsFilterTimezone || c.timezone === state.contactsFilterTimezone)
+    .filter(c => !state.contactsFilterLeadSource || c.leadSource === state.contactsFilterLeadSource)
+    .sort((a, b) => b.score - a.score);
 }
 
-function setContactsSort(val) {
-  state.contactsSort = val;
+function setContactsFilter(key, val) {
+  state[key] = val;
   state.contactsPage = 0;
   renderContacts();
 }
 
 function renderContacts() {
-  const sorted = sortContacts(state.contacts);
+  const filtered = getFilteredContacts();
   const pageSize = state.contactsPageSize || 50;
   const page = state.contactsPage || 0;
-  const paginated = sorted.slice(page * pageSize, (page + 1) * pageSize);
-  const totalPages = Math.ceil(sorted.length / pageSize);
+  const paginated = filtered.slice(page * pageSize, (page + 1) * pageSize);
+  const totalPages = Math.ceil(filtered.length / pageSize);
+
+  const timezones = [...new Set(state.contacts.map(c => c.timezone).filter(Boolean))].sort();
+  const leadSources = [...new Set(state.contacts.map(c => c.leadSource).filter(Boolean))].sort();
+  const selectStyle = 'font-size:12px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer';
 
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${sorted.length} companies assigned to you</p></div>
+      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${filtered.length} of ${state.contacts.length} companies</p></div>
       <div class="topbar-right">
-        <input id="contact-search" placeholder="Search companies..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:200px" oninput="filterContacts(this.value)" />
-        <select onchange="setContactsSort(this.value)" style="font-size:12px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer">
-          <option value="score" ${state.contactsSort==='score'?'selected':''}>Sort: AI Score</option>
-          <option value="timezone" ${state.contactsSort==='timezone'?'selected':''}>Sort: Timezone</option>
-          <option value="leadsource" ${state.contactsSort==='leadsource'?'selected':''}>Sort: Lead Source</option>
+        <input id="contact-search" placeholder="Search companies..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:180px" oninput="filterContacts(this.value)" />
+        <select onchange="setContactsFilter('contactsFilterTimezone',this.value)" style="${selectStyle}">
+          <option value="">All Timezones</option>
+          ${timezones.map(tz => `<option value="${tz}" ${state.contactsFilterTimezone===tz?'selected':''}>${tz}</option>`).join('')}
+        </select>
+        <select onchange="setContactsFilter('contactsFilterLeadSource',this.value)" style="${selectStyle}">
+          <option value="">All Lead Sources</option>
+          ${leadSources.map(ls => `<option value="${ls}" ${state.contactsFilterLeadSource===ls?'selected':''}>${ls}</option>`).join('')}
         </select>
         <span style="font-size:12px;color:var(--text2);margin-left:4px">Per page:</span>
         ${[25,50,100].map(n => `<button class="btn btn-sm ${pageSize===n?'btn-primary':''}" onclick="setContactsPageSize(${n})">${n}</button>`).join('')}
@@ -478,10 +484,10 @@ function renderContacts() {
     </div>
     <div class="content">
       <div style="display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;cursor:pointer" onclick="setContactsSort('score')">Company ${state.contactsSort==='score'?'↓':''}</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;cursor:pointer" onclick="setContactsSort('timezone')">Timezone ${state.contactsSort==='timezone'?'↓':''}</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;cursor:pointer" onclick="setContactsSort('leadsource')">Lead Source ${state.contactsSort==='leadsource'?'↓':''}</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em"></div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Company</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Timezone</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Lead Source</div>
+        <div></div>
       </div>
       <div class="lead-list" id="contact-list">${paginated.map(leadCardHTML).join('')}</div>
       ${totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:8px;margin-top:12px">
