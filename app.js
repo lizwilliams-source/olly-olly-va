@@ -402,18 +402,14 @@ async function renderDashboard() {
       </div>
     </div>`;
 
-  if (!state.dailyBriefing) {
-    try {
-      const insight = await askAI(`Give me a sharp 2-sentence morning briefing: which of my companies should I prioritize today and why? Be specific with names.`, `Today's date: ${new Date().toLocaleDateString()}`);
-      state.dailyBriefing = insight;
-    } catch(e) { state.dailyBriefing = `AI briefing unavailable: ${e.message}`; }
-  }
   const el = document.querySelector('#ai-daily-insight .ai-insight-body');
-  if (el) el.innerHTML = state.dailyBriefing.replace(/\n/g,'<br>') +
-    `<div class="ai-chips">
-      <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
-      <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
-    </div>`;
+  if (el && state.dailyBriefing) {
+    el.innerHTML = state.dailyBriefing.replace(/\n/g,'<br>') +
+      `<div class="ai-chips">
+        <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
+        <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
+      </div>`;
+  }
 
   loadDashboardPanels();
 }
@@ -1244,7 +1240,24 @@ async function init() {
   showView('dashboard');
   await Promise.all([loadContacts(), loadQueue(), loadPipeline()]);
   if (state.currentView === 'dashboard') showView('dashboard');
+  loadDailyBriefing();
   startAutoRefresh();
+}
+
+async function loadDailyBriefing() {
+  if (state.dailyBriefing || !state.contacts.length) return;
+  try {
+    const insight = await askAI(`Give me a sharp 2-3 sentence morning briefing for my pipeline: which of my assigned companies should I prioritize today and why? Be specific with company names and reference their actual data.`, `Today's date: ${new Date().toLocaleDateString()}`);
+    state.dailyBriefing = insight;
+  } catch(e) { state.dailyBriefing = `AI briefing unavailable: ${e.message}`; }
+  if (state.currentView === 'dashboard') {
+    const el = document.querySelector('#ai-daily-insight .ai-insight-body');
+    if (el) el.innerHTML = state.dailyBriefing.replace(/\n/g,'<br>') +
+      `<div class="ai-chips">
+        <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
+        <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
+      </div>`;
+  }
 }
 
 function startAutoRefresh() {
