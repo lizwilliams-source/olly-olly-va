@@ -409,7 +409,7 @@ async function renderDashboard() {
         <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
         <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
       </div>`;
-  } catch(e) { const el = document.querySelector('#ai-daily-insight .ai-insight-body'); if (el) el.textContent = 'AI briefing unavailable.'; }
+  } catch(e) { const el = document.querySelector('#ai-daily-insight .ai-insight-body'); if (el) el.textContent = `AI briefing unavailable: ${e.message}`; }
 
   loadDashboardPanels();
 }
