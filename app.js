@@ -324,7 +324,7 @@ async function askAI(userMsg, extraContext = '') {
   ).join('\n');
   const system = `You are the Olly Olly Virtual Assistant — a smart pipeline management assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.\n\nTheir current companies (top 20):\n${contactSummary}\n\n${extraContext}\n\nBe concise, friendly, and specific. When drafting emails, write the full email with subject line.`;
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
-  const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ max_tokens: 1000, system, messages }) });
+  const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ max_tokens: 2000, system, messages }) });
   if (!res.ok) { const errData = await res.json().catch(() => ({})); throw new Error(errData.error || `AI API error: ${res.status}`); }
   const data = await res.json();
   if (data.error) throw new Error(JSON.stringify(data.error));
@@ -1247,7 +1247,7 @@ async function init() {
 async function loadDailyBriefing() {
   if (state.dailyBriefing || !state.contacts.length) return;
   try {
-    const insight = await askAI(`Give me a sharp 2-3 sentence morning briefing for my pipeline: which of my assigned companies should I prioritize today and why? Be specific with company names and reference their actual data.`, `Today's date: ${new Date().toLocaleDateString()}`);
+    const insight = await askAI(`Give me a 2-3 sentence morning briefing for my pipeline. Which of my assigned companies should I prioritize today and why? Be specific with company names. Always write complete sentences — never cut off mid-sentence.`, `Today's date: ${new Date().toLocaleDateString()}`);
     state.dailyBriefing = insight;
   } catch(e) { state.dailyBriefing = `AI briefing unavailable: ${e.message}`; }
   if (state.currentView === 'dashboard') {
