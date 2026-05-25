@@ -1,5 +1,7 @@
 import { getSession, logUsage } from './_helpers.js';
 
+const GEMINI_MODEL = 'gemini-1.5-flash';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -8,36 +10,51 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const body = { ...req.body, model: 'claude-haiku-4-5-20251001' };
+    const { system, messages, max_tokens } = req.body;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
+    // Convert Claude message format to Gemini format
+    const contents = messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
 
-    const data = await response.json();
-    if (!response.ok) {
-      console.error('Anthropic error:', data);
-      return res.status(response.status).json({ error: data });
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: system ? { parts: [{ text: system }] } : undefined,
+          contents,
+          generationConfig: { maxOutputTokens: max_tokens || 1000 },
+        }),
+      }
+    );
+
+    const data = await geminiRes.json();
+    if (!geminiRes.ok) {
+      console.error('Gemini error:', data);
+      return res.status(geminiRes.status).json({ error: data.error?.message || JSON.stringify(data) });
     }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const usage = data.usageMetadata || {};
 
     // Log usage async
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await getSession(token);
-    if (session?.email && data.usage) {
+    if (session?.email) {
       logUsage(session.email, {
-        claude_input: data.usage.input_tokens || 0,
-        claude_output: data.usage.output_tokens || 0,
+        claude_input: usage.promptTokenCount || 0,
+        claude_output: usage.candidatesTokenCount || 0,
         ai_queries: 1,
       }).catch(() => {});
     }
 
-    return res.status(200).json(data);
+    // Return in Claude-compatible format so app.js doesn't need changes
+    return res.status(200).json({
+      content: [{ type: 'text', text }],
+    });
   } catch (err) {
     console.error('AI proxy error:', err);
     return res.status(500).json({ error: err.message });
