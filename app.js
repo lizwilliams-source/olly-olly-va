@@ -130,7 +130,8 @@ const COMPANY_PROPS = [
   'lifecyclestage', 'hs_lead_status', 'createdate', 'lastmodifieddate',
   'industry', 'timezone_', 'lead_source', 'subscription_status',
   'hs_last_logged_call_date', 'dnr', 'recent_user_to_call',
-  'hubspot_owner_assigneddate', 'notes_next_activity_date'
+  'hubspot_owner_assigneddate', 'notes_next_activity_date',
+  'most_recent_call_outcome'
 ];
 
 async function loadContacts(after = null) {
@@ -279,6 +280,7 @@ function enrichContact(raw) {
   const isFollowUp = followUpStages.includes(masterStage) && daysSince > 3 && !p.notes_next_activity_date;
   const isRoeRisk = p.dnr !== 'Yes' && (daysSince > 14);
   const lastCallerWasMe = p.recent_user_to_call && p.recent_user_to_call === (p.hubspot_owner_id || '');
+  const isDmConnected = lastCallerWasMe && (p.most_recent_call_outcome || '').toLowerCase().includes('dm connected');
   return {
     id: raw.id, name, phone: p.phone || '', city: p.city || '', state: p.state || '',
     website: p.website || '', industry: p.industry || '', timezone: p['timezone_'] || '',
@@ -287,7 +289,7 @@ function enrichContact(raw) {
     daysSince, lastContacted: lastContactedMs ? new Date(lastContactedMs).toLocaleDateString() : 'Never',
     score, urgency, initials, avatarColor: avatarColor(raw.id),
     needsCall: daysSince > 7 || !lastContactedMs, createdAt: p.createdate,
-    isFollowUp, isRoeRisk, lastCallerWasMe,
+    isFollowUp, isRoeRisk, isDmConnected,
   };
 }
 
@@ -328,6 +330,7 @@ async function askAI(userMsg, extraContext = '') {
   const contactSummary = state.contacts.map(c => {
     const flags = [
       c.isFollowUp ? 'FOLLOW-UP NEEDED' : '',
+      c.isDmConnected ? 'DM CONNECTED (call back)' : '',
       c.isRoeRisk ? 'ROE RISK' : '',
     ].filter(Boolean).join(', ');
     return `${c.name} | stage: ${c.masterStage || c.stage} | last contact: ${c.lastContacted} (${c.daysSince === 999 ? 'never' : c.daysSince + 'd ago'}) | ${flags ? 'PRIORITY: ' + flags : 'no priority flags'} | timezone: ${c.timezone} | lead source: ${c.leadSource}`;
@@ -1258,7 +1261,7 @@ async function loadDailyBriefing() {
   if (state.dailyBriefingLoaded || !state.contacts.length) return;
   state.dailyBriefingLoaded = true;
   try {
-    const insight = await askAI(`Give me a morning briefing for my pipeline. Prioritize companies in this order: 1) FOLLOW-UP NEEDED (active deals that need attention), 2) ROE RISK (haven't been called in 14+ days), 3) anything else urgent. List the top 3-5 companies I should call today by name and briefly say why each one is a priority. Write in complete sentences.`, `Today's date: ${new Date().toLocaleDateString()}`);
+    const insight = await askAI(`Give me a morning briefing for my pipeline. Prioritize companies in this order: 1) FOLLOW-UP NEEDED (active deals needing attention), 2) DM CONNECTED (I spoke with the decision maker — need to follow up), 3) ROE RISK (haven't been called in 14+ days), 4) anything else urgent. List the top 3-5 companies I should call today by name and briefly say why each one is a priority. Write in complete sentences.`, `Today's date: ${new Date().toLocaleDateString()}`);
     state.dailyBriefing = insight;
   } catch(e) { state.dailyBriefing = `AI briefing unavailable: ${e.message}`; }
   if (state.currentView === 'dashboard') {
