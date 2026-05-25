@@ -321,7 +321,7 @@ async function askAI(userMsg, extraContext = '') {
   const contactSummary = state.contacts.slice(0, 20).map(c =>
     `${c.name} (score ${c.score}, last contact: ${c.lastContacted}, stage: ${c.masterStage || c.stage}, location: ${c.city} ${c.state}, timezone: ${c.timezone}, lead source: ${c.leadSource})`
   ).join('\n');
-  const system = `You are the Olly Olly Virtual Assistant — a smart sales assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.\n\nTheir current companies (top 20):\n${contactSummary}\n\n${extraContext}\n\nBe concise, friendly, and specific. When drafting emails, write the full email with subject line. When coaching, give concrete talk tracks and objection handling.`;
+  const system = `You are the Olly Olly Virtual Assistant — a smart pipeline management assistant for an SEO agency that sells to home service contractors. You are helping ${state.user?.name || 'a sales rep'} manage their assigned companies.\n\nTheir current companies (top 20):\n${contactSummary}\n\n${extraContext}\n\nBe concise, friendly, and specific. When drafting emails, write the full email with subject line.`;
   const messages = [...state.chatHistory, { role: 'user', content: userMsg }];
   const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ max_tokens: 1000, system, messages }) });
   if (!res.ok) throw new Error(`AI API error: ${res.status}`);
@@ -344,7 +344,6 @@ function showView(view) {
     myqueue: renderMyQueue,
     pipeline: renderPipeline,
     ai: renderAI,
-    coaching: renderCoaching,
     admin: renderAdmin,
     nevercalled: () => renderPriorityView('nevercalled', '📵 Never Called By Me'),
     roerisklist: () => renderPriorityView('roerisklist', '⚠️ ROE Risk'),
@@ -408,7 +407,6 @@ async function renderDashboard() {
       `<div class="ai-chips">
         <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
         <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
-        <div class="ai-chip" onclick="openAIWithPrompt('Give me a coaching tip for my hardest objection today')">Get coaching tip ↗</div>
       </div>`;
   } catch(e) { const el = document.querySelector('#ai-daily-insight .ai-insight-body'); if (el) el.textContent = 'AI briefing unavailable.'; }
 
@@ -548,7 +546,6 @@ async function renderMyQueue() {
       <div class="topbar-right">
         ${state.queues.length < 5 ? `<button class="btn" onclick="promptCreateQueue()">+ New Queue</button>` : ''}
         ${activeQueue ? `<button class="btn" onclick="clearQueue('${activeQueue.id}')">🗑 Clear</button>` : ''}
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me call scripts for all the companies in my queue')">✨ AI scripts</button>
       </div>
     </div>
     <div class="content">
@@ -715,7 +712,6 @@ async function renderPriorityView(viewKey, title) {
       <div class="topbar-left"><h2>${title}</h2><p id="priority-count">Loading...</p></div>
       <div class="topbar-right">
         <button class="btn" onclick="showView('dashboard')">← Dashboard</button>
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me call scripts for my ${title} companies')">✨ AI scripts</button>
       </div>
     </div>
     <div class="content">
@@ -836,7 +832,6 @@ list.innerHTML = page.map(raw => {
             ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none">📞 ${rawPhone}</a>`
             : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
       </div>
-      <button class="btn btn-sm" onclick="openAIWithPrompt('Write a call script for ${name.replace(/'/g,"\\'")}. Include opener, discovery questions, and objection handling.')">✨</button>
     </div>`;
   }).join('');
 
@@ -900,7 +895,7 @@ function toggleSkip(viewKey, companyId, currentlySkipped) {
 function renderAI() {
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>✨ AI Assistant</h2><p>Ask anything about your companies, get emails drafted, coaching, and more</p></div>
+      <div class="topbar-left"><h2>✨ AI Assistant</h2><p>Ask anything about your pipeline, get follow-up emails drafted, and more</p></div>
     </div>
     <div class="chat-wrap">
       <div class="chat-messages" id="chat-messages">
@@ -910,14 +905,13 @@ function renderAI() {
         <div class="ai-chips" style="padding:0 0 8px">
           <div class="ai-chip" onclick="sendPreset('Who are my top 3 companies to focus on today and why?')">Today's priorities ↗</div>
           <div class="ai-chip" onclick="sendPreset('Draft follow-up emails for my top 5 companies that need outreach')">Draft follow-ups ↗</div>
-          <div class="ai-chip" onclick="sendPreset('Give me a cold call script for a new lead in the discovery stage')">Call script ↗</div>
           <div class="ai-chip" onclick="sendPreset('Analyze my pipeline and tell me what is at risk')">Pipeline analysis ↗</div>
           <div class="ai-chip" onclick="sendPreset('Give me tips for handling the objection: we do not have budget right now')">Handle objection ↗</div>
         </div>
         ${state.chatHistory.map(m => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}"><div class="msg-label">${m.role === 'user' ? 'You' : 'Assistant'}</div><div class="msg-bubble">${m.content.replace(/\n/g, '<br>')}</div></div>`).join('')}
       </div>
       <div class="chat-input-area">
-        <input id="chat-input" placeholder="Ask about a company, request a draft, get coaching..." onkeydown="if(event.key==='Enter')sendChat()" />
+        <input id="chat-input" placeholder="Ask about a company, request a follow-up draft, analyze pipeline..." onkeydown="if(event.key==='Enter')sendChat()" />
         <button class="btn btn-primary" onclick="sendChat()">Send →</button>
       </div>
     </div>`;
@@ -971,19 +965,6 @@ function scrollChat() {
   if (msgs) msgs.scrollTop = msgs.scrollHeight;
 }
 
-// ── SALES COACHING ────────────────────────────────────────────────────────────
-function renderCoaching() {
-  document.getElementById('main').innerHTML = `
-    <div class="topbar"><div class="topbar-left"><h2>🎯 Sales Coaching</h2><p>Coming soon</p></div></div>
-    <div class="content">
-      <div style="text-align:center;padding:60px 20px">
-        <div style="font-size:48px;margin-bottom:16px">🎯</div>
-        <div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:8px">Sales Coaching</div>
-        <div style="font-size:13px;color:var(--text2);max-width:360px;margin:0 auto 24px">Personalized coaching, objection handling scripts, and talk tracks — coming soon.</div>
-        <button class="btn btn-primary" onclick="openAIWithPrompt('Give me 3 sales coaching tips specific to selling SEO to home service contractors')">✨ Ask AI for coaching now</button>
-      </div>
-    </div>`;
-}
 
 // ── ADMIN ─────────────────────────────────────────────────────────────────────
 async function loadUsageDashboard(month) {
@@ -1205,7 +1186,7 @@ async function openContact(id) {
     </button>
     <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.masterStage || c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
     <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
-    <button class="btn btn-primary btn-sm" onclick="openAIWithPrompt('Give me a call script for ${c.name}. Stage: ${c.masterStage || c.stage}. Include opener, key questions, and objection handling.')">📞 Call script</button>`;
+`;
   document.getElementById('modal').style.display = 'flex';
 }
 
