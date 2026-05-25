@@ -227,49 +227,95 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
-  // ── QUEUE: GET ─────────────────────────────────────────────────────────────
-  if (action === 'getqueue') {
+  // ── QUEUES: GET ALL (migrates old single-queue format) ─────────────────────
+  if (action === 'getqueues') {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await kvGet(`session:${token}`);
     if (!session) return res.status(401).json({ error: 'Not logged in' });
-    const queue = await kvGet(`queue:${session.email}`) || [];
-    return res.status(200).json(queue);
-  }
-
-  // ── QUEUE: ADD ─────────────────────────────────────────────────────────────
-  if (action === 'addqueue') {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    const session = await kvGet(`session:${token}`);
-    if (!session) return res.status(401).json({ error: 'Not logged in' });
-    const { company } = req.body;
-    if (!company?.id) return res.status(400).json({ error: 'Company required' });
-    const queue = await kvGet(`queue:${session.email}`) || [];
-    if (!queue.find(c => c.id === company.id)) {
-      queue.push(company);
-      await kvSet(`queue:${session.email}`, queue);
+    let queues = await kvGet(`queues:${session.email}`);
+    if (!queues) {
+      const oldQueue = await kvGet(`queue:${session.email}`) || [];
+      queues = [{ id: 'default', name: 'My Queue', companies: oldQueue }];
+      await kvSet(`queues:${session.email}`, queues);
     }
-    return res.status(200).json({ ok: true, count: queue.length });
+    return res.status(200).json({ queues });
   }
 
-  // ── QUEUE: REMOVE ──────────────────────────────────────────────────────────
-  if (action === 'removequeue') {
+  // ── QUEUES: CREATE ─────────────────────────────────────────────────────────
+  if (action === 'createqueue') {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await kvGet(`session:${token}`);
     if (!session) return res.status(401).json({ error: 'Not logged in' });
-    const { companyId } = req.body;
-    const queue = await kvGet(`queue:${session.email}`) || [];
-    const updated = queue.filter(c => c.id !== companyId);
-    await kvSet(`queue:${session.email}`, updated);
-    return res.status(200).json({ ok: true, count: updated.length });
+    const { name } = req.body;
+    const queues = await kvGet(`queues:${session.email}`) || [];
+    if (queues.length >= 5) return res.status(400).json({ error: 'Max 5 queues' });
+    queues.push({ id: crypto.randomUUID(), name: name || 'New Queue', companies: [] });
+    await kvSet(`queues:${session.email}`, queues);
+    return res.status(200).json({ queues });
   }
 
-  // ── QUEUE: CLEAR ───────────────────────────────────────────────────────────
+  // ── QUEUES: RENAME ─────────────────────────────────────────────────────────
+  if (action === 'renamequeue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { queueId, name } = req.body;
+    const queues = await kvGet(`queues:${session.email}`) || [];
+    const q = queues.find(q => q.id === queueId);
+    if (q) { q.name = name; await kvSet(`queues:${session.email}`, queues); }
+    return res.status(200).json({ queues });
+  }
+
+  // ── QUEUES: DELETE ─────────────────────────────────────────────────────────
+  if (action === 'deletequeue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { queueId } = req.body;
+    let queues = await kvGet(`queues:${session.email}`) || [];
+    queues = queues.filter(q => q.id !== queueId);
+    await kvSet(`queues:${session.email}`, queues);
+    return res.status(200).json({ queues });
+  }
+
+  // ── QUEUES: ADD COMPANY ────────────────────────────────────────────────────
+  if (action === 'addtoqueue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { queueId, company } = req.body;
+    if (!company?.id) return res.status(400).json({ error: 'Company required' });
+    const queues = await kvGet(`queues:${session.email}`) || [];
+    const q = queues.find(q => q.id === queueId);
+    if (q && !q.companies.find(c => c.id === company.id)) {
+      q.companies.push(company);
+      await kvSet(`queues:${session.email}`, queues);
+    }
+    return res.status(200).json({ queues });
+  }
+
+  // ── QUEUES: REMOVE COMPANY ─────────────────────────────────────────────────
+  if (action === 'removefromqueue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { queueId, companyId } = req.body;
+    const queues = await kvGet(`queues:${session.email}`) || [];
+    const q = queues.find(q => q.id === queueId);
+    if (q) { q.companies = q.companies.filter(c => c.id !== companyId); await kvSet(`queues:${session.email}`, queues); }
+    return res.status(200).json({ queues });
+  }
+
+  // ── QUEUES: CLEAR ──────────────────────────────────────────────────────────
   if (action === 'clearqueue') {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await kvGet(`session:${token}`);
     if (!session) return res.status(401).json({ error: 'Not logged in' });
-    await kvSet(`queue:${session.email}`, []);
-    return res.status(200).json({ ok: true });
+    const { queueId } = req.body;
+    const queues = await kvGet(`queues:${session.email}`) || [];
+    const q = queues.find(q => q.id === queueId);
+    if (q) { q.companies = []; await kvSet(`queues:${session.email}`, queues); }
+    return res.status(200).json({ queues });
   }
 
 return res.status(400).json({ error: 'Unknown action' });

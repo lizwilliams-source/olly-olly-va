@@ -12,7 +12,8 @@ const state = {
   ownerId: null,
   token: null,
   isAdmin: false,
-  queue: [],
+  queues: [],
+  activeQueueId: null,
   pipeline: [],
   contactsPage: 0,
   contactsTotal: 0,
@@ -151,45 +152,116 @@ async function loadContacts(after = null) {
   } catch (e) { console.error('Failed to load companies:', e); updateHsStatus(false); }
 }
 
-async function loadQueue() {
-  try {
-    const res = await fetch('/api/users?action=getqueue', { headers: { Authorization: `Bearer ${state.token}` } });
-    const data = await res.json();
-    if (Array.isArray(data)) {
-      state.queue = data;
-      const badge = document.getElementById('badge-queue');
-      if (badge) badge.textContent = state.queue.length;
-    }
-  } catch (e) { console.error('Failed to load queue:', e); }
+function updateQueueBadge() {
+  const total = state.queues.reduce((sum, q) => sum + q.companies.length, 0);
+  const badge = document.getElementById('badge-queue');
+  if (badge) badge.textContent = total;
 }
 
-async function addToQueue(companyId) {
+function findCompanyQueue(companyId) {
+  return state.queues.find(q => q.companies.find(c => c.id === companyId)) || null;
+}
+
+async function loadQueue() {
+  try {
+    const res = await fetch('/api/users?action=getqueues', { headers: { Authorization: `Bearer ${state.token}` } });
+    const data = await res.json();
+    if (data.queues) {
+      state.queues = data.queues;
+      if (!state.activeQueueId || !state.queues.find(q => q.id === state.activeQueueId)) {
+        state.activeQueueId = state.queues[0]?.id || null;
+      }
+      updateQueueBadge();
+    }
+  } catch (e) { console.error('Failed to load queues:', e); }
+}
+
+async function addToQueue(companyId, queueId) {
   const c = state.contacts.find(x => x.id === companyId);
   if (!c) return;
+  if (!queueId) {
+    if (state.queues.length === 0) await createQueue('My Queue');
+    queueId = state.queues[0].id;
+  }
   const company = { id: c.id, name: c.name, phone: c.phone, city: c.city, state: c.state, timezone: c.timezone, leadSource: c.leadSource, stage: c.stage };
   try {
-    const res = await fetch('/api/users?action=addqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ company }) });
+    const res = await fetch('/api/users?action=addtoqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId, company }) });
     const data = await res.json();
-    if (data.ok) {
-      if (!state.queue.find(q => q.id === companyId)) state.queue.push(company);
-      const badge = document.getElementById('badge-queue');
-      if (badge) badge.textContent = state.queue.length;
-      toast(`${c.name} added to queue ✓`, 'success');
+    if (data.queues) {
+      state.queues = data.queues;
+      updateQueueBadge();
+      const q = state.queues.find(q => q.id === queueId);
+      toast(`${c.name} added to "${q?.name || 'queue'}" ✓`, 'success');
     }
   } catch (e) { toast('Failed to add to queue', 'error'); }
 }
 
-async function removeFromQueue(companyId) {
+async function removeFromQueue(companyId, queueId) {
+  if (!queueId) {
+    const q = findCompanyQueue(companyId);
+    if (!q) return;
+    queueId = q.id;
+  }
   try {
-    const res = await fetch('/api/users?action=removequeue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId }) });
+    const res = await fetch('/api/users?action=removefromqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId, companyId }) });
     const data = await res.json();
-    if (data.ok) {
-      state.queue = state.queue.filter(c => c.id !== companyId);
-      const badge = document.getElementById('badge-queue');
-      if (badge) badge.textContent = state.queue.length;
+    if (data.queues) {
+      state.queues = data.queues;
+      updateQueueBadge();
       if (state.currentView === 'myqueue') renderMyQueue();
     }
   } catch (e) { toast('Failed to remove from queue', 'error'); }
+}
+
+async function createQueue(name) {
+  const res = await fetch('/api/users?action=createqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ name }) });
+  const data = await res.json();
+  if (data.queues) {
+    state.queues = data.queues;
+    state.activeQueueId = data.queues[data.queues.length - 1].id;
+    updateQueueBadge();
+    if (state.currentView === 'myqueue') renderMyQueue();
+  }
+}
+
+async function renameQueue(queueId, name) {
+  const res = await fetch('/api/users?action=renamequeue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId, name }) });
+  const data = await res.json();
+  if (data.queues) { state.queues = data.queues; if (state.currentView === 'myqueue') renderMyQueue(); }
+}
+
+async function deleteQueue(queueId) {
+  if (!confirm('Delete this queue?')) return;
+  const res = await fetch('/api/users?action=deletequeue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId }) });
+  const data = await res.json();
+  if (data.queues) {
+    state.queues = data.queues;
+    if (state.activeQueueId === queueId) state.activeQueueId = state.queues[0]?.id || null;
+    updateQueueBadge();
+    if (state.currentView === 'myqueue') renderMyQueue();
+  }
+}
+
+async function clearQueue(queueId) {
+  if (!confirm('Clear this queue?')) return;
+  const res = await fetch('/api/users?action=clearqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId }) });
+  const data = await res.json();
+  if (data.queues) { state.queues = data.queues; updateQueueBadge(); if (state.currentView === 'myqueue') renderMyQueue(); }
+}
+
+function switchQueue(queueId) {
+  state.activeQueueId = queueId;
+  renderMyQueue();
+}
+
+async function promptCreateQueue() {
+  const name = prompt('Queue name:');
+  if (name?.trim()) await createQueue(name.trim());
+}
+
+async function promptRenameQueue(queueId, currentName) {
+  const name = prompt('Rename queue:', currentName);
+  if (name?.trim() && name.trim() !== currentName) await renameQueue(queueId, name.trim());
 }
 
 function enrichContact(raw) {
@@ -429,7 +501,7 @@ function filterContacts(q) {
 
 function leadCardHTML(c) {
   const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
-  const inQueue = state.queue.find(q => q.id === c.id);
+  const inQueue = findCompanyQueue(c.id);
   return `<div class="lead-card ${c.urgency}" onclick="openContact('${c.id}')" style="display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;align-items:center">
     <div style="display:flex;align-items:center;gap:8px;min-width:0">
       <div class="avatar" style="background:${c.avatarColor.bg};color:${c.avatarColor.color};flex-shrink:0">${c.initials}</div>
@@ -445,69 +517,66 @@ function leadCardHTML(c) {
     <div style="font-size:12px;color:var(--text2)">${c.leadSource ? `📌 ${c.leadSource}` : '—'}</div>
     <div class="lead-right" style="flex-direction:row;gap:6px">
       <span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${c.score}</span>
-      <button class="btn btn-sm" style="${inQueue ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="event.stopPropagation();${inQueue ? `removeFromQueue('${c.id}')` : `addToQueue('${c.id}')`}">${inQueue ? '✓' : '+'}</button>
+      <button class="btn btn-sm" style="${inQueue ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="event.stopPropagation();${inQueue ? `removeFromQueue('${c.id}','${inQueue.id}')` : `addToQueue('${c.id}')`}">${inQueue ? '✓' : '+'}</button>
     </div>
   </div>`;
 }
 
 // ── MY QUEUE ──────────────────────────────────────────────────────────────────
 async function renderMyQueue() {
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  const companies = activeQueue?.companies || [];
+  const totalCompanies = state.queues.reduce((s, q) => s + q.companies.length, 0);
+
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>📋 My Queue</h2><p>${state.queue.length} companies in your queue</p></div>
+      <div class="topbar-left"><h2>📋 My Queues</h2><p>${totalCompanies} companies across ${state.queues.length} queue${state.queues.length !== 1 ? 's' : ''}</p></div>
       <div class="topbar-right">
-        <button class="btn" onclick="clearQueue()">🗑 Clear queue</button>
+        ${state.queues.length < 5 ? `<button class="btn" onclick="promptCreateQueue()">+ New Queue</button>` : ''}
+        ${activeQueue ? `<button class="btn" onclick="clearQueue('${activeQueue.id}')">🗑 Clear</button>` : ''}
         <button class="btn btn-primary" onclick="openAIWithPrompt('Give me call scripts for all the companies in my queue')">✨ AI scripts</button>
       </div>
     </div>
     <div class="content">
-      <div class="ai-insight" style="margin-bottom:4px">
-        <div class="ai-insight-body" style="font-size:12px">
-          Your persistent call queue — companies stay here until you remove them. Phone numbers are clickable for Aloware.
-        </div>
+      <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+        ${state.queues.length === 0 ? '<div style="font-size:13px;color:var(--text2)">No queues yet.</div>' : state.queues.map(q => `
+          <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:${q.id === activeQueue?.id ? 'var(--purple)' : 'var(--bg3)'};color:${q.id === activeQueue?.id ? 'white' : 'var(--text2)'};cursor:pointer;font-size:12px;font-weight:600;border:1px solid ${q.id === activeQueue?.id ? 'transparent' : 'var(--border)'}" onclick="switchQueue('${q.id}')">
+            <span>${q.name}</span>
+            <span style="opacity:0.65;font-size:11px">${q.companies.length}</span>
+            <span onclick="event.stopPropagation();promptRenameQueue('${q.id}','${q.name.replace(/'/g, "\\'")}')" style="opacity:0.55;font-size:10px;margin-left:2px" title="Rename">✏️</span>
+            ${state.queues.length > 1 ? `<span onclick="event.stopPropagation();deleteQueue('${q.id}')" style="opacity:0.55;font-size:11px;font-weight:700;margin-left:1px" title="Delete">✕</span>` : ''}
+          </div>`).join('')}
       </div>
       <div id="queue-list" class="lead-list">
-        ${state.queue.length === 0 ? '<div class="empty-state">Your queue is empty. Add companies from any list using the + Queue button.</div>' :
-          state.queue.map(c => {
-            const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
-            const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
-            const colors = [
-              {bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},
-              {bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},
-              {bg:'rgba(167,139,250,.2)',color:'#a78bfa'},
-            ];
-            const ac = colors[parseInt(c.id,10) % colors.length];
-            const initials = c.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-            return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--purple);border-radius:var(--radius)">
-              <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
-                  <span style="cursor:pointer;text-decoration:underline;text-underline-offset:3px" onclick="openContact('${c.id}')">${c.name}</span>
-                  <a href="${hsUrl}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
+        ${companies.length === 0
+          ? `<div class="empty-state">${state.queues.length === 0 ? 'Create a queue first using "+ New Queue" above.' : 'This queue is empty. Add companies from any list.'}</div>`
+          : companies.map(c => {
+              const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
+              const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
+              const colors = [{bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},{bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},{bg:'rgba(167,139,250,.2)',color:'#a78bfa'}];
+              const ac = colors[parseInt(c.id,10) % colors.length];
+              const initials = c.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+              return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--purple);border-radius:var(--radius)">
+                <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
+                    <span style="cursor:pointer;text-decoration:underline;text-underline-offset:3px" onclick="openContact('${c.id}')">${c.name}</span>
+                    <a href="${hsUrl}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
+                  </div>
+                  <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
+                    ${c.timezone ? `<span>🕐 ${c.timezone}</span>` : ''}
+                    ${c.leadSource ? `<span>· 📌 ${c.leadSource}</span>` : ''}
+                    ${c.stage ? `<span>· <span style="color:var(--amber)">${c.stage}</span></span>` : ''}
+                  </div>
                 </div>
-                <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
-                  ${c.timezone ? `<span>🕐 ${c.timezone}</span>` : ''}
-                  ${c.leadSource ? `<span>· 📌 ${c.leadSource}</span>` : ''}
-                  ${c.stage ? `<span>· <span style="color:var(--amber)">${c.stage}</span></span>` : ''}
+                <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
+                  ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${c.phone}</a>` : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
+                  <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="removeFromQueue('${c.id}','${activeQueue.id}')">Remove</button>
                 </div>
-              </div>
-              <div style="flex-shrink:0;text-align:right;display:flex;align-items:center;gap:8px">
-                ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${c.phone}</a>` : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
-                <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="removeFromQueue('${c.id}')">Remove</button>
-              </div>
-            </div>`;
-          }).join('')}
+              </div>`;
+            }).join('')}
       </div>
     </div>`;
-}
-
-async function clearQueue() {
-  if (!confirm('Clear your entire queue?')) return;
-  await fetch('/api/users?action=clearqueue', { headers: { Authorization: `Bearer ${state.token}` } });
-  state.queue = [];
-  const badge = document.getElementById('badge-queue');
-  if (badge) badge.textContent = 0;
-  renderMyQueue();
 }
 
 // ── PIPELINE ──────────────────────────────────────────────────────────────────
@@ -720,7 +789,7 @@ list.innerHTML = page.map(raw => {
     const rawPhone = raw.properties.contactPhone || p.phone || '';
     const cleanPhone = rawPhone ? rawPhone.replace(/\D/g,'') : '';
     const isSkipped = skipped.has(raw.id);
-    const inQueue = state.queue.find(q => q.id === raw.id);
+    const inQueue = findCompanyQueue(raw.id);
     const colors = [{bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},{bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},{bg:'rgba(167,139,250,.2)',color:'#a78bfa'}];
     const ac = colors[parseInt(raw.id,10) % colors.length];
 
@@ -793,7 +862,7 @@ async function addPageToQueue(viewKey) {
   let added = 0;
   for (const cb of checkboxes) {
     const id = cb.dataset.id;
-    if (!state.queue.find(q => q.id === id)) {
+    if (!findCompanyQueue(id)) {
       await addToQueue(id);
       added++;
     }
@@ -803,7 +872,7 @@ async function addPageToQueue(viewKey) {
 
 async function handleQueueCheckbox(viewKey, companyId, checked) {
   if (checked) { await addToQueue(companyId); }
-  else { await removeFromQueue(companyId); }
+  else { const q = findCompanyQueue(companyId); if (q) await removeFromQueue(companyId, q.id); }
   renderPriorityPage(viewKey);
 }
 
@@ -1076,7 +1145,7 @@ async function openContact(id) {
   const notes = state.notes[id] || [];
   const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
   const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
-  const inQueue = state.queue.find(q => q.id === c.id);
+  const inQueue = findCompanyQueue(id);
 
   document.getElementById('modal-title').innerHTML = `${c.name} <a href="${hsUrl}" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:none;font-weight:400">Open in HubSpot ↗</a>`;
   document.getElementById('modal-body').innerHTML = `
@@ -1109,11 +1178,14 @@ async function openContact(id) {
     </div>`;
 
   const inPipeline = state.pipeline.find(p => p.companyId === id);
+  const queueBtn = inQueue
+    ? `<button class="btn btn-sm btn-primary" onclick="removeFromQueue('${id}','${inQueue.id}');closeModal()">✓ ${inQueue.name}</button>`
+    : state.queues.length <= 1
+      ? `<button class="btn btn-sm" onclick="addToQueue('${id}',${state.queues[0] ? `'${state.queues[0].id}'` : 'null'});closeModal()">+ Queue</button>`
+      : `<select onchange="if(this.value){addToQueue('${id}',this.value);closeModal()}" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer"><option value="">📋 Add to queue...</option>${state.queues.map(q=>`<option value="${q.id}">${q.name}</option>`).join('')}</select>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
-    <button class="btn btn-sm ${inQueue ? 'btn-primary' : ''}" onclick="${inQueue ? `removeFromQueue('${id}')` : `addToQueue('${id}')`}; closeModal()">
-      ${inQueue ? '✓ In Queue' : '+ Add to Queue'}
-    </button>
+    ${queueBtn}
     <button class="btn btn-sm ${inPipeline ? '' : ''}" style="${inPipeline ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="${inPipeline ? `removeFromPipeline('${id}')` : `addToPipeline('${id}')`}; closeModal()">
       ${inPipeline ? '📌 In Pipeline' : '📌 Pipeline'}
     </button>
