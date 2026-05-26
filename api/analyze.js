@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const { transcript, companyName, callType = 'general' } = req.body;
+    const { transcript, companyName, callType = 'general', includeCoaching = false } = req.body;
     if (!transcript) return res.status(400).json({ error: 'No transcript provided' });
 
     const baseFields = `
@@ -59,12 +59,13 @@ export default async function handler(req, res) {
     "overall": "Overall coaching feedback and top 2-3 things to improve"
   }`;
 
-    const extraFields = {
+    const typeFields = {
       general: '',
       sales: `,\n${salesFields}`,
       demo: `,\n${demoFields}`,
-      coaching: `,\n${coachingFields}`,
     }[callType] || '';
+
+    const extraFields = typeFields + (includeCoaching ? `,\n${coachingFields}` : '');
 
     const prompt = `You are analyzing a sales call transcript for an SEO agency that sells to home service contractors.
 
