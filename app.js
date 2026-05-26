@@ -1071,7 +1071,7 @@ async function renderAdmin() {
       </div>
       <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:8px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div class="section-title">Usage & Gemini Cost</div>
+          <div class="section-title">Usage & API Cost</div>
           <input type="month" id="usage-month" value="${currentMonth}" onchange="loadUsageDashboard(this.value)"
             style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none" />
         </div>
@@ -1505,6 +1505,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
   const c = state.contacts.find(x => x.id === companyId);
   const followUpDate = analysis.followUpDate ? new Date(analysis.followUpDate) : null;
   const followUpDateStr = followUpDate ? followUpDate.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' }) : null;
+  const sn = analysis.salesNotes || {};
 
   document.getElementById('call-logger-content').innerHTML = `
     <div style="display:flex;flex-direction:column;gap:14px">
@@ -1527,21 +1528,46 @@ function showCallAnalysis(companyId, transcript, analysis) {
         <textarea id="call-notes-input" style="width:100%;min-height:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${analysis.callNotes || ''}</textarea>
       </div>
 
+      <div style="background:linear-gradient(135deg,rgba(167,139,250,.08),rgba(79,142,247,.06));border:1px solid rgba(167,139,250,.2);border-radius:var(--radius);padding:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">📊 Sales Notes</div>
+
+        <div style="margin-bottom:10px">
+          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Customer's Goals with Olly Olly</div>
+          <textarea id="sn-goals" style="width:100%;min-height:60px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.customerGoals || ''}</textarea>
+        </div>
+
+        <div style="margin-bottom:10px">
+          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Pain Points</div>
+          <textarea id="sn-pain" style="width:100%;min-height:60px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.painPoints || ''}</textarea>
+        </div>
+
+        <div style="margin-bottom:10px">
+          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Currently with Another Company?</div>
+          <textarea id="sn-company" style="width:100%;min-height:50px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.currentCompany || ''}</textarea>
+        </div>
+
+        <div style="margin-bottom:10px">
+          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Primary Services / What They Want to Showcase</div>
+          <textarea id="sn-services" style="width:100%;min-height:50px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.primaryServices || ''}</textarea>
+        </div>
+
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" onclick="saveSalesNotes('${companyId}')">
+          💾 Save Sales Notes to HubSpot
+        </button>
+        <div id="sn-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+      </div>
+
       ${analysis.followUpCommitment ? `
       <div style="background:var(--blue-dim);border:1px solid rgba(79,142,247,.2);border-radius:var(--radius-sm);padding:12px">
         <div class="field-label" style="margin-bottom:6px;color:var(--blue)">📅 Follow-up Detected</div>
         <div style="font-size:13px;color:var(--text);margin-bottom:8px">"${analysis.followUpCommitment}"</div>
         ${followUpDateStr ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Suggested date: <strong style="color:var(--text)">${followUpDateStr}</strong></div>` : ''}
-        <input type="datetime-local" id="followup-datetime" 
+        <input type="datetime-local" id="followup-datetime"
           value="${analysis.followUpDate ? analysis.followUpDate.slice(0,16) : ''}"
           style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
         <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">
-            📅 Add to Google Calendar
-          </button>
-          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">
-            ✅ Create HubSpot Task
-          </button>
+          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
+          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
         </div>
       </div>` : `
       <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px">
@@ -1550,18 +1576,14 @@ function showCallAnalysis(companyId, transcript, analysis) {
         <input type="datetime-local" id="followup-datetime"
           style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
         <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">
-            📅 Add to Google Calendar
-          </button>
-          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">
-            ✅ Create HubSpot Task
-          </button>
+          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
+          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
         </div>
       </div>`}
 
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveCallNotes('${companyId}')">
-          💾 Save notes to HubSpot
+          💾 Save Call Notes to HubSpot
         </button>
         <button class="btn" style="flex:1;justify-content:center" onclick="showTranscript(\`${transcript.replace(/`/g, '\\`').replace(/\$/g, '\\$').slice(0, 5000)}\`)">
           📄 View transcript
@@ -1630,6 +1652,27 @@ async function createHubSpotTask(companyId) {
     toast('✅ HubSpot task created! ✓', 'success');
   } catch (e) {
     toast('Failed to create HubSpot task', 'error');
+  }
+}
+
+async function saveSalesNotes(companyId) {
+  const goals = document.getElementById('sn-goals')?.value || '';
+  const pain = document.getElementById('sn-pain')?.value || '';
+  const company = document.getElementById('sn-company')?.value || '';
+  const services = document.getElementById('sn-services')?.value || '';
+
+  const body = `📊 SALES NOTES\n\nCustomer Goals:\n${goals}\n\nPain Points:\n${pain}\n\nCurrent Provider:\n${company}\n\nPrimary Services:\n${services}`;
+
+  try {
+    await hsPost('/crm/v3/objects/notes', {
+      properties: { hs_note_body: body, hs_timestamp: Date.now() },
+      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
+    });
+    const msg = document.getElementById('sn-save-msg');
+    if (msg) msg.textContent = '✓ Saved to HubSpot!';
+    toast('Sales notes saved to HubSpot ✓', 'success');
+  } catch {
+    toast('Failed to save sales notes', 'error');
   }
 }
 
