@@ -9,29 +9,72 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const { transcript, companyName } = req.body;
+    const { transcript, companyName, callType = 'general' } = req.body;
     if (!transcript) return res.status(400).json({ error: 'No transcript provided' });
+
+    const baseFields = `
+  "summary": "2-3 sentence summary of the call",
+  "callNotes": "Detailed notes about what was discussed, objections, interest level, next steps",
+  "followUpCommitment": "Exact quote or description of any follow-up commitment made, or null",
+  "followUpDate": "ISO date string for follow-up (calculate from today ${new Date().toISOString().split('T')[0]}), or null",
+  "followUpTitle": "Short title for calendar event, or null",
+  "sentiment": "positive|neutral|negative",
+  "interested": true or false`;
+
+    const salesFields = `
+  "salesNotes": {
+    "customerGoals": "What are the customer's goals with Olly Olly? Be specific.",
+    "painPoints": "What are the customer's pain points? Be specific.",
+    "currentCompany": "Is the client currently with another marketing company? If yes, who and what are they doing? If no, say No current provider.",
+    "primaryServices": "What are the top services they provide or want to showcase?"
+  }`;
+
+    const demoFields = `
+  "demoNotes": {
+    "currentProviderExperience": "Their experience with current provider or lead gen company",
+    "businessGoals": "Goals for the business — additional jobs per week/month, anything else",
+    "currentMarketing": "What marketing are they currently doing?",
+    "anticipatedObjections": "What objections do you anticipate based on the call?",
+    "painLeverage": "What are the key pain points and leverage points?",
+    "soleDecisionMaker": "Are they the sole decision maker? Who else is involved?",
+    "contactInfo": "Contact info mentioned on the call",
+    "demoDateTime": "Demo date and time if mentioned, or null",
+    "additional": "Anything additional worth noting"
+  }`;
+
+    const coachingFields = `
+  "coachingNotes": {
+    "intro": { "score": 1-5, "notes": "Feedback on intro" },
+    "elevatorPitch": { "score": 1-5, "notes": "Feedback on probing questions and active listening" },
+    "otf": { "score": 1-5, "notes": "Feedback on confidence assuming time and avoiding objections" },
+    "settingDemo": { "score": 1-5, "notes": "Feedback on uncovering DM needs" },
+    "website": { "score": 1-5, "notes": "Feedback on website pain point questions" },
+    "confirmingDMs": { "score": 1-5, "notes": "Feedback on confirming decision makers" },
+    "recap": { "score": 1-5, "notes": "Feedback on recap and confirming time" },
+    "pace": { "score": 1-5, "notes": "Feedback on pace" },
+    "tonality": { "score": 1-5, "notes": "Feedback on tonality" },
+    "listening": { "score": 1-5, "notes": "Feedback on active listening" },
+    "communication": { "score": 1-5, "notes": "Feedback on avoiding verbal crutches" },
+    "tailoredPitch": { "score": 1-5, "notes": "Feedback on tailoring pitch to DM" },
+    "overall": "Overall coaching feedback and top 2-3 things to improve"
+  }`;
+
+    const extraFields = {
+      general: '',
+      sales: `,\n${salesFields}`,
+      demo: `,\n${demoFields}`,
+      coaching: `,\n${coachingFields}`,
+    }[callType] || '';
 
     const prompt = `You are analyzing a sales call transcript for an SEO agency that sells to home service contractors.
 
 Company: ${companyName || 'Unknown'}
+Call Type: ${callType}
 Transcript: ${transcript}
 
 Extract and return ONLY a JSON object with these fields, no other text:
 {
-  "summary": "2-3 sentence summary of the call",
-  "callNotes": "Detailed notes about what was discussed, objections, interest level, next steps",
-  "followUpCommitment": "Exact quote or description of any follow-up commitment made (e.g. 'call me in two weeks', 'send proposal by Friday')",
-  "followUpDate": "ISO date string for the follow-up (calculate from today ${new Date().toISOString().split('T')[0]}), or null if none",
-  "followUpTitle": "Short title for the calendar event (e.g. 'Follow-up call with ABC Plumbing')",
-  "sentiment": "positive|neutral|negative",
-  "interested": true or false,
-  "salesNotes": {
-    "customerGoals": "What are the customer's goals with Olly Olly? (leads, brand awareness, revenue target, expanding to new service areas, etc). Be specific based on what they said.",
-    "painPoints": "What are the customer's pain points? (e.g. too busy to chase reviews, competitor outranking them, no time for marketing, etc). Be specific.",
-    "currentCompany": "Is the client currently with another marketing company? If yes, who and what are they doing? If no, say 'No current provider'.",
-    "primaryServices": "What are the top services they provide or want to showcase? (e.g. hardwood floor refinishing, epoxy coating, etc). List them."
-  }
+${baseFields}${extraFields}
 }`;
 
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -43,7 +86,7 @@ Extract and return ONLY a JSON object with these fields, no other text:
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1500,
+        max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
