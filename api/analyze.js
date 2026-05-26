@@ -25,7 +25,13 @@ Extract and return ONLY a JSON object with these fields, no other text:
   "followUpDate": "ISO date string for the follow-up (calculate from today ${new Date().toISOString().split('T')[0]}), or null if none",
   "followUpTitle": "Short title for the calendar event (e.g. 'Follow-up call with ABC Plumbing')",
   "sentiment": "positive|neutral|negative",
-  "interested": true or false
+  "interested": true or false,
+  "salesNotes": {
+    "customerGoals": "What are the customer's goals with Olly Olly? (leads, brand awareness, revenue target, expanding to new service areas, etc). Be specific based on what they said.",
+    "painPoints": "What are the customer's pain points? (e.g. too busy to chase reviews, competitor outranking them, no time for marketing, etc). Be specific.",
+    "currentCompany": "Is the client currently with another marketing company? If yes, who and what are they doing? If no, say 'No current provider'.",
+    "primaryServices": "What are the top services they provide or want to showcase? (e.g. hardwood floor refinishing, epoxy coating, etc). List them."
+  }
 }`;
 
     const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -37,7 +43,7 @@ Extract and return ONLY a JSON object with these fields, no other text:
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1000,
+        max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -48,7 +54,6 @@ Extract and return ONLY a JSON object with these fields, no other text:
     const analysisText = data.content?.[0]?.text || '';
     if (!analysisText) throw new Error('Claude returned empty response');
 
-    // Log usage async
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await getSession(token);
     if (session?.email) {
