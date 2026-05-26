@@ -1777,12 +1777,12 @@ async function saveSalesNotes(companyId) {
   const company = document.getElementById('sn-company')?.value || '';
   const services = document.getElementById('sn-services')?.value || '';
 
-const body = `📊 SALES NOTES\n\n` + [
-    `• Customer Goals:\n${goals}`,
-    `• Pain Points:\n${pain}`,
-    `• Current Provider:\n${company}`,
-    `• Primary Services:\n${services}`,
-  ].join('\n\n');
+const body = `<h3>📊 SALES NOTES</h3>` + [
+    `<p><strong>Customer Goals:</strong><br>${goals.replace(/\n/g, '<br>')}</p>`,
+    `<p><strong>Pain Points:</strong><br>${pain.replace(/\n/g, '<br>')}</p>`,
+    `<p><strong>Current Provider:</strong><br>${company.replace(/\n/g, '<br>')}</p>`,
+    `<p><strong>Primary Services:</strong><br>${services.replace(/\n/g, '<br>')}</p>`,
+  ].join('');
   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
@@ -1839,7 +1839,9 @@ async function saveDemoNotes(companyId) {
     ['Biggest Pain Points', 'dn-pain'],
     ['Sole Decision Maker?', 'dn-dm'],
   ];
-   const body = `🎯 SET CALL NOTES\n\n` + fields.map(([label, id]) => `• ${label}:\n${document.getElementById(id)?.value || '—'}`).join('\n\n');
+  const body = `<h3>🎯 SET CALL NOTES</h3>` + fields.map(([label, id]) => 
+    `<p><strong>${label}:</strong><br>${(document.getElementById(id)?.value || '—').replace(/\n/g, '<br>')}</p>`
+  ).join('');
    try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
@@ -1863,7 +1865,9 @@ async function saveCoachingNotes(companyId) {
   const overall = document.getElementById('coaching-overall')?.value || '';
   const total = Object.values(scores).reduce((s, n) => s + n, 0);
   const avg = Object.keys(scores).length ? (total / Object.keys(scores).length).toFixed(1) : '—';
-const body = `🏆 COACHING SCORECARD — Average Score: ${avg}/5\n\n` + lines.map(l => `• ${l}`).join('\n\n') + (overall ? `\n\n• Overall Feedback:\n${overall}` : '');
+const body = `<h3>🏆 COACHING SCORECARD — Average Score: ${avg}/5</h3>` + 
+    lines.map(l => `<p><strong>${l.split('\n')[0]}</strong><br>${l.split('\n').slice(1).join('<br>')}</p>`).join('') +
+    (overall ? `<p><strong>Overall Feedback:</strong><br>${overall.replace(/\n/g, '<br>')}</p>` : '');
   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
