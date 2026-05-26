@@ -1840,6 +1840,7 @@ async function saveDemoNotes(companyId) {
     ['Sole Decision Maker?', 'dn-dm'],
   ];
    const body = `🎯 SET CALL NOTES\n\n` + fields.map(([label, id]) => `• ${label}:\n${document.getElementById(id)?.value || '—'}`).join('\n\n');
+   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
       associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
