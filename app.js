@@ -1542,10 +1542,10 @@ async function handleAudioUpload(companyId) {
     const analysisRes = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general' }),
+      body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false }),
     });
     const analysisJson = await analysisRes.json();
-    body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false }),
+    if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error || JSON.stringify(analysisJson)}`);
     const { analysis } = analysisJson;
 
     state.transcribing = false;
