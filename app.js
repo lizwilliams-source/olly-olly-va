@@ -1777,12 +1777,12 @@ async function saveSalesNotes(companyId) {
   const company = document.getElementById('sn-company')?.value || '';
   const services = document.getElementById('sn-services')?.value || '';
 
- const body = `📊 SALES NOTES\n${'─'.repeat(40)}\n\n` + [
-    `▸ Customer Goals\n${goals}`,
-    `▸ Pain Points\n${pain}`,
-    `▸ Current Provider\n${company}`,
-    `▸ Primary Services\n${services}`,
-  ].join('\n\n─────────────────────────────────────────\n\n');
+const body = `📊 SALES NOTES\n\n` + [
+    `【 Customer Goals 】\n${goals}`,
+    `【 Pain Points 】\n${pain}`,
+    `【 Current Provider 】\n${company}`,
+    `【 Primary Services 】\n${services}`,
+  ].join('\n\n\n');
   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
@@ -1839,7 +1839,7 @@ async function saveDemoNotes(companyId) {
     ['Biggest Pain Points', 'dn-pain'],
     ['Sole Decision Maker?', 'dn-dm'],
   ];
-  const body = `🎯 SET CALL NOTES\n${'─'.repeat(40)}\n\n` + fields.map(([label, id]) => `▸ ${label}\n${document.getElementById(id)?.value || '—'}`).join('\n\n─────────────────────────────────────────\n\n');
+  const body = `🎯 SET CALL NOTES\n\n` + fields.map(([label, id]) => `【 ${label} 】\n${document.getElementById(id)?.value || '—'}`).join('\n\n\n');
   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
@@ -1863,7 +1863,7 @@ async function saveCoachingNotes(companyId) {
   const overall = document.getElementById('coaching-overall')?.value || '';
   const total = Object.values(scores).reduce((s, n) => s + n, 0);
   const avg = Object.keys(scores).length ? (total / Object.keys(scores).length).toFixed(1) : '—';
-const body = `🏆 COACHING SCORECARD\nAverage Score: ${avg}/5\n${'─'.repeat(40)}\n\n` + lines.map(l => `▸ ${l}`).join('\n\n─────────────────────────────────────────\n\n') + (overall ? `\n\n─────────────────────────────────────────\n\n▸ Overall Feedback\n${overall}` : '');
+const body = `🏆 COACHING SCORECARD — Average Score: ${avg}/5\n\n` + lines.map(l => `【 ${l} 】`).join('\n\n') + (overall ? `\n\n【 Overall Feedback 】\n${overall}` : '');
   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
