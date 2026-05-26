@@ -1517,7 +1517,7 @@ async function handleAudioUpload(companyId) {
     const analysisRes = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ transcript, companyName: c.name }),
+      body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general' }),
     });
     const analysisJson = await analysisRes.json();
     if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error || JSON.stringify(analysisJson)}`);
