@@ -1411,7 +1411,21 @@ async function openCallLogger(companyId) {
               </div>
             </div>`).join('')}
         </div>
-        <div id="upload-section" style="display:none;margin-top:16px">
+<div id="upload-section" style="display:none;margin-top:16px">
+          <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:linear-gradient(135deg,rgba(245,166,35,.06),rgba(240,82,82,.04));border:1px solid rgba(245,166,35,.2);border-radius:var(--radius);cursor:pointer" onclick="toggleCoaching()">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:18px">🏆</span>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--text)">Include Coaching Scorecard</div>
+                  <div style="font-size:11px;color:var(--text2);margin-top:1px">AI will score this call across 12 areas</div>
+                </div>
+              </div>
+              <div id="coaching-toggle" style="width:40px;height:22px;border-radius:99px;background:var(--bg3);border:1px solid var(--border2);position:relative;transition:all .2s;flex-shrink:0">
+                <div id="coaching-toggle-knob" style="width:16px;height:16px;border-radius:50%;background:var(--text3);position:absolute;top:2px;left:2px;transition:all .2s"></div>
+              </div>
+            </div>
+          </div>
           <div style="border-top:1px solid var(--border);padding-top:16px">
             <div id="selected-type-label" style="font-size:12px;color:var(--text2);margin-bottom:12px;text-align:center"></div>
             <input type="file" id="audio-upload" accept="audio/*,.mp3,.mp4,.m4a,.wav,.webm" style="display:none" onchange="handleAudioUpload('${companyId}')" />
@@ -1428,6 +1442,17 @@ async function openCallLogger(companyId) {
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
 
   document.getElementById('modal').style.display = 'flex';
+}
+
+function toggleCoaching() {
+  state.coachingEnabled = !state.coachingEnabled;
+  const toggle = document.getElementById('coaching-toggle');
+  const knob = document.getElementById('coaching-toggle-knob');
+  if (toggle) toggle.style.background = state.coachingEnabled ? 'var(--amber)' : 'var(--bg3)';
+  if (knob) {
+    knob.style.left = state.coachingEnabled ? '20px' : '2px';
+    knob.style.background = state.coachingEnabled ? '#fff' : 'var(--text3)';
+  }
 }
 
 function selectCallType(type) {
@@ -1520,7 +1545,7 @@ async function handleAudioUpload(companyId) {
       body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general' }),
     });
     const analysisJson = await analysisRes.json();
-    if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error || JSON.stringify(analysisJson)}`);
+    body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false }),
     const { analysis } = analysisJson;
 
     state.transcribing = false;
@@ -1621,7 +1646,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
       </div>`;
   }
 
-  if (type === 'coaching') {
+  if (state.coachingEnabled) {
     const cn = analysis.coachingNotes || {};
     const areas = [
       { key: 'intro', label: 'Intro', q: 'Did the rep confidently introduce themself and use the DM\'s name?' },
