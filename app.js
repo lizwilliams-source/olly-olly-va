@@ -1679,7 +1679,15 @@ function showCallAnalysis(companyId, transcript, analysis) {
       </div>
       <div>
         <div class="field-label" style="margin-bottom:6px">📝 Call Notes</div>
-        <textarea id="call-notes-input" style="width:100%;min-height:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${analysis.callNotes || ''}</te
+        <textarea id="call-notes-input" style="width:100%;min-height:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${analysis.callNotes || ''}</textarea>
+      </div>
+      ${typeBlock}
+      ${followUpBlock}
+      ${saveBar}
+    </div>`;
+
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
+}
 
 async function createCalendarEvent(companyId) {
   const c = state.contacts.find(x => x.id === companyId);
