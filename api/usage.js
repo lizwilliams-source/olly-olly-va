@@ -16,7 +16,6 @@ export default async function handler(req, res) {
 
   const month = req.query.month || new Date().toISOString().slice(0, 7);
 
-  // Get all users
   const keysRes = await fetch(`${KV_URL}/keys/${encodeURIComponent('user:*')}`, { headers });
   const keys = (await keysRes.json()).result || [];
   const users = await Promise.all(keys.map(k =>
@@ -24,16 +23,15 @@ export default async function handler(req, res) {
       .then(r => r.json()).then(d => d.result ? JSON.parse(d.result) : null)
   ));
 
-  // Get usage for each user
   const rows = await Promise.all(users.filter(Boolean).map(async u => {
     const usageRes = await fetch(`${KV_URL}/get/${encodeURIComponent(`usage:${u.email}:${month}`)}`, { headers });
     const usage = await usageRes.json().then(d => d.result ? JSON.parse(d.result) : {});
 
-    const whisper_seconds = usage.groq_seconds || 0; // stored as groq_seconds (legacy key)
-    const gemini_input = usage.claude_input || 0;     // stored as claude_input (legacy key)
-    const gemini_output = usage.claude_output || 0;   // stored as claude_output (legacy key)
-    // Gemini 2.5 Flash pricing: $0.15/M input, $0.60/M output
-    const gemini_cost = (gemini_input / 1_000_000) * 0.15 + (gemini_output / 1_000_000) * 0.60;
+    const whisper_seconds = usage.groq_seconds || 0;
+    const claude_input = usage.claude_input || 0;
+    const claude_output = usage.claude_output || 0;
+    // Claude Haiku pricing: $0.80/M input, $4.00/M output
+    const claude_cost = (claude_input / 1_000_000) * 0.80 + (claude_output / 1_000_000) * 4.00;
 
     return {
       name: u.name,
@@ -41,10 +39,10 @@ export default async function handler(req, res) {
       calls: usage.calls || 0,
       ai_queries: usage.ai_queries || 0,
       whisper_seconds: Math.round(whisper_seconds),
-      gemini_input,
-      gemini_output,
-      gemini_cost,
-      total_cost: gemini_cost, // VPS is flat-rate, only Gemini has per-use cost
+      claude_input,
+      claude_output,
+      claude_cost,
+      total_cost: claude_cost,
     };
   }));
 
