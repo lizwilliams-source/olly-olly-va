@@ -1393,15 +1393,34 @@ async function openCallLogger(companyId) {
   document.getElementById('modal-title').innerHTML = `📞 Log Call — ${c.name}`;
   document.getElementById('modal-body').innerHTML = `
     <div id="call-logger-content">
-      <div style="text-align:center;padding:20px">
-        <div style="font-size:40px;margin-bottom:12px">🎙️</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px">Upload call recording</div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:16px">Upload the Aloware recording and AI will transcribe it, write call notes, and schedule a follow-up automatically.</div>
-        <input type="file" id="audio-upload" accept="audio/*,.mp3,.mp4,.m4a,.wav,.webm" style="display:none" onchange="handleAudioUpload('${companyId}')" />
-        <button class="btn btn-primary" style="justify-content:center;width:100%;margin-bottom:8px" onclick="document.getElementById('audio-upload').click()">
-          📁 Choose recording file
-        </button>
-        <div style="font-size:11px;color:var(--text3)">Supports MP3, MP4, M4A, WAV</div>
+      <div style="padding:8px 0">
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px">Select call type before uploading:</div>
+        <div style="display:flex;flex-direction:column;gap:8px" id="call-type-selector">
+          ${[
+            { key: 'general', icon: '📝', label: 'General Notes', desc: 'Summary, call notes, and follow-up scheduling' },
+            { key: 'sales', icon: '📊', label: 'Sales Notes', desc: 'Goals, pain points, current provider, primary services' },
+            { key: 'demo', icon: '🎯', label: 'Demo Set Notes', desc: 'Experience with provider, objections, decision maker, demo time' },
+            { key: 'coaching', icon: '🏆', label: 'Coaching Notes', desc: 'Full scorecard — intro, pitch, tonality, listening, and more' },
+          ].map(t => `
+            <div class="call-type-option" data-type="${t.key}" onclick="selectCallType('${t.key}')"
+              style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .15s">
+              <div style="font-size:24px;flex-shrink:0">${t.icon}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--text)">${t.label}</div>
+                <div style="font-size:11px;color:var(--text2);margin-top:2px">${t.desc}</div>
+              </div>
+            </div>`).join('')}
+        </div>
+        <div id="upload-section" style="display:none;margin-top:16px">
+          <div style="border-top:1px solid var(--border);padding-top:16px">
+            <div id="selected-type-label" style="font-size:12px;color:var(--text2);margin-bottom:12px;text-align:center"></div>
+            <input type="file" id="audio-upload" accept="audio/*,.mp3,.mp4,.m4a,.wav,.webm" style="display:none" onchange="handleAudioUpload('${companyId}')" />
+            <button class="btn btn-primary" style="justify-content:center;width:100%;margin-bottom:8px" onclick="document.getElementById('audio-upload').click()">
+              📁 Choose recording file
+            </button>
+            <div style="font-size:11px;color:var(--text3);text-align:center">Supports MP3, MP4, M4A, WAV</div>
+          </div>
+        </div>
       </div>
     </div>`;
 
@@ -1409,6 +1428,23 @@ async function openCallLogger(companyId) {
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
 
   document.getElementById('modal').style.display = 'flex';
+}
+
+function selectCallType(type) {
+  state.selectedCallType = type;
+  document.querySelectorAll('.call-type-option').forEach(el => {
+    const isSelected = el.dataset.type === type;
+    el.style.borderColor = isSelected ? 'var(--blue)' : 'var(--border)';
+    el.style.background = isSelected ? 'var(--blue-dim)' : 'var(--bg3)';
+  });
+  const labels = {
+    general: '📝 General Notes selected',
+    sales: '📊 Sales Notes selected',
+    demo: '🎯 Demo Set Notes selected',
+    coaching: '🏆 Coaching Notes selected',
+  };
+  document.getElementById('selected-type-label').textContent = labels[type];
+  document.getElementById('upload-section').style.display = 'block';
 }
 
 async function handleAudioUpload(companyId) {
@@ -1505,11 +1541,132 @@ function showCallAnalysis(companyId, transcript, analysis) {
   const c = state.contacts.find(x => x.id === companyId);
   const followUpDate = analysis.followUpDate ? new Date(analysis.followUpDate) : null;
   const followUpDateStr = followUpDate ? followUpDate.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' }) : null;
-  const sn = analysis.salesNotes || {};
+  const type = state.selectedCallType || 'general';
+
+  const followUpBlock = `
+    ${analysis.followUpCommitment ? `
+    <div style="background:var(--blue-dim);border:1px solid rgba(79,142,247,.2);border-radius:var(--radius-sm);padding:12px">
+      <div class="field-label" style="margin-bottom:6px;color:var(--blue)">📅 Follow-up Detected</div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:8px">"${analysis.followUpCommitment}"</div>
+      ${followUpDateStr ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Suggested date: <strong style="color:var(--text)">${followUpDateStr}</strong></div>` : ''}
+      <input type="datetime-local" id="followup-datetime"
+        value="${analysis.followUpDate ? analysis.followUpDate.slice(0,16) : ''}"
+        style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
+        <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
+      </div>
+    </div>` : `
+    <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px">
+      <div class="field-label" style="margin-bottom:6px">📅 Schedule Follow-up</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">No follow-up commitment detected — set one manually:</div>
+      <input type="datetime-local" id="followup-datetime"
+        style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
+        <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
+      </div>
+    </div>`}`;
+
+  const saveBar = `
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveCallNotes('${companyId}')">💾 Save to HubSpot</button>
+      <button class="btn" style="flex:1;justify-content:center" onclick="showTranscript(\`${transcript.replace(/`/g, '\\`').replace(/\$/g, '\\$').slice(0, 5000)}\`)">📄 Transcript</button>
+    </div>`;
+
+  let typeBlock = '';
+
+  if (type === 'sales') {
+    const sn = analysis.salesNotes || {};
+    typeBlock = `
+      <div style="background:linear-gradient(135deg,rgba(167,139,250,.08),rgba(79,142,247,.06));border:1px solid rgba(167,139,250,.2);border-radius:var(--radius);padding:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">📊 Sales Notes</div>
+        ${[
+          { id: 'sn-goals', label: "Customer's Goals with Olly Olly", val: sn.customerGoals },
+          { id: 'sn-pain', label: 'Pain Points', val: sn.painPoints },
+          { id: 'sn-company', label: 'Currently with Another Company?', val: sn.currentCompany },
+          { id: 'sn-services', label: 'Primary Services / What They Want to Showcase', val: sn.primaryServices },
+        ].map(f => `
+          <div style="margin-bottom:10px">
+            <div class="field-label" style="margin-bottom:4px;color:var(--text2)">${f.label}</div>
+            <textarea id="${f.id}" style="width:100%;min-height:60px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${f.val || ''}</textarea>
+          </div>`).join('')}
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" onclick="saveSalesNotes('${companyId}')">💾 Save Sales Notes to HubSpot</button>
+        <div id="sn-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+      </div>`;
+  }
+
+  if (type === 'demo') {
+    const dn = analysis.demoNotes || {};
+    typeBlock = `
+      <div style="background:linear-gradient(135deg,rgba(62,207,142,.06),rgba(79,142,247,.06));border:1px solid rgba(62,207,142,.2);border-radius:var(--radius);padding:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">🎯 Demo Set Notes</div>
+        ${[
+          { id: 'dn-experience', label: 'Experience with Current Provider (Lead Gen or Competitor)', val: dn.currentProviderExperience },
+          { id: 'dn-goals', label: 'Goals for Business (jobs per week/month, focus areas)', val: dn.businessGoals },
+          { id: 'dn-marketing', label: 'Current Marketing', val: dn.currentMarketing },
+          { id: 'dn-objections', label: 'Anticipated Objections', val: dn.anticipatedObjections },
+          { id: 'dn-leverage', label: 'Anticipated Pain / Leverage Points', val: dn.painLeverage },
+          { id: 'dn-dm', label: 'Sole Decision Maker?', val: dn.soleDecisionMaker },
+          { id: 'dn-contact', label: 'Contact Info', val: dn.contactInfo },
+          { id: 'dn-demo', label: 'Demo Date / Time', val: dn.demoDateTime },
+          { id: 'dn-additional', label: 'Anything Additional?', val: dn.additional },
+        ].map(f => `
+          <div style="margin-bottom:10px">
+            <div class="field-label" style="margin-bottom:4px;color:var(--text2)">${f.label}</div>
+            <textarea id="${f.id}" style="width:100%;min-height:55px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${f.val || ''}</textarea>
+          </div>`).join('')}
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" onclick="saveDemoNotes('${companyId}')">💾 Save Demo Notes to HubSpot</button>
+        <div id="dn-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+      </div>`;
+  }
+
+  if (type === 'coaching') {
+    const cn = analysis.coachingNotes || {};
+    const areas = [
+      { key: 'intro', label: 'Intro', q: 'Did the rep confidently introduce themself and use the DM\'s name?' },
+      { key: 'elevatorPitch', label: 'Elevator Pitch', q: 'Did the rep ask probing questions and actively listen?' },
+      { key: 'otf', label: 'Shoot for the OTF', q: 'Did the rep confidently assume time and avoid unnecessary objections?' },
+      { key: 'settingDemo', label: 'Setting the Demo', q: 'Did the rep ask questions to uncover the DM\'s needs?' },
+      { key: 'website', label: 'Website Situation', q: 'Did the rep address website-related pain points?' },
+      { key: 'confirmingDMs', label: 'Confirming DMs', q: 'Did the rep confirm all decision-makers?' },
+      { key: 'recap', label: 'Research & Recap', q: 'Did the rep recap key points and confirm the time?' },
+      { key: 'pace', label: 'Pace', q: 'Did the rep maintain an even, professional pace?' },
+      { key: 'tonality', label: 'Tonality', q: 'Did the rep sound confident, professional, and enthusiastic?' },
+      { key: 'listening', label: 'Active Listening', q: 'Did the rep actively listen and respond to the DM\'s answers?' },
+      { key: 'communication', label: 'Communication', q: 'Did the rep avoid verbal crutches and communicate clearly?' },
+      { key: 'tailoredPitch', label: 'Tailored Pitch', q: 'Did the rep tailor the pitch to the DM\'s unique situation?' },
+    ];
+    typeBlock = `
+      <div style="background:linear-gradient(135deg,rgba(245,166,35,.06),rgba(240,82,82,.04));border:1px solid rgba(245,166,35,.2);border-radius:var(--radius);padding:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">🏆 Coaching Scorecard</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:14px">Score each area 1–5. AI pre-fills based on the transcript — edit as needed.</div>
+        ${areas.map(a => `
+          <div style="margin-bottom:12px;padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <div style="font-size:12px;font-weight:600;color:var(--text)">${a.label}</div>
+              <div style="display:flex;gap:4px">
+                ${[1,2,3,4,5].map(n => `
+                  <button onclick="setScore('${a.key}',${n})" id="score-${a.key}-${n}"
+                    style="width:28px;height:28px;border-radius:50%;border:1px solid var(--border2);background:${(cn[a.key]?.score === n) ? 'var(--amber)' : 'var(--bg3)'};color:${(cn[a.key]?.score === n) ? '#fff' : 'var(--text2)'};font-size:11px;font-weight:700;cursor:pointer">
+                    ${n}
+                  </button>`).join('')}
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:6px">${a.q}</div>
+            <textarea id="coaching-${a.key}" style="width:100%;min-height:50px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;color:var(--text);font-size:11px;outline:none;font-family:inherit;resize:vertical" placeholder="Notes...">${cn[a.key]?.notes || ''}</textarea>
+          </div>`).join('')}
+        <div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:12px">
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px">Overall Feedback</div>
+          <textarea id="coaching-overall" style="width:100%;min-height:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;color:var(--text);font-size:11px;outline:none;font-family:inherit;resize:vertical">${cn.overall || ''}</textarea>
+        </div>
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" onclick="saveCoachingNotes('${companyId}')">💾 Save Coaching Notes to HubSpot</button>
+        <div id="cn-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+      </div>`;
+  }
 
   document.getElementById('call-logger-content').innerHTML = `
     <div style="display:flex;flex-direction:column;gap:14px">
-
       <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px">
         <div class="field-label" style="margin-bottom:6px">📋 Call Summary</div>
         <div style="font-size:13px;color:var(--text);line-height:1.6">${analysis.summary || 'No summary available'}</div>
@@ -1517,83 +1674,12 @@ function showCallAnalysis(companyId, transcript, analysis) {
           <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:${analysis.interested ? 'var(--green-dim)' : 'var(--red-dim)'};color:${analysis.interested ? 'var(--green)' : 'var(--red)'}">
             ${analysis.interested ? '✓ Interested' : '✗ Not interested'}
           </span>
-          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--bg2);color:var(--text2)">
-            ${analysis.sentiment || 'neutral'}
-          </span>
+          <span style="font-size:11px;padding:2px 8px;border-radius:99px;background:var(--bg2);color:var(--text2)">${analysis.sentiment || 'neutral'}</span>
         </div>
       </div>
-
       <div>
         <div class="field-label" style="margin-bottom:6px">📝 Call Notes</div>
-        <textarea id="call-notes-input" style="width:100%;min-height:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${analysis.callNotes || ''}</textarea>
-      </div>
-
-      <div style="background:linear-gradient(135deg,rgba(167,139,250,.08),rgba(79,142,247,.06));border:1px solid rgba(167,139,250,.2);border-radius:var(--radius);padding:14px">
-        <div style="font-size:12px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">📊 Sales Notes</div>
-
-        <div style="margin-bottom:10px">
-          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Customer's Goals with Olly Olly</div>
-          <textarea id="sn-goals" style="width:100%;min-height:60px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.customerGoals || ''}</textarea>
-        </div>
-
-        <div style="margin-bottom:10px">
-          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Pain Points</div>
-          <textarea id="sn-pain" style="width:100%;min-height:60px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.painPoints || ''}</textarea>
-        </div>
-
-        <div style="margin-bottom:10px">
-          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Currently with Another Company?</div>
-          <textarea id="sn-company" style="width:100%;min-height:50px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.currentCompany || ''}</textarea>
-        </div>
-
-        <div style="margin-bottom:10px">
-          <div class="field-label" style="margin-bottom:4px;color:var(--text2)">Primary Services / What They Want to Showcase</div>
-          <textarea id="sn-services" style="width:100%;min-height:50px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${sn.primaryServices || ''}</textarea>
-        </div>
-
-        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" onclick="saveSalesNotes('${companyId}')">
-          💾 Save Sales Notes to HubSpot
-        </button>
-        <div id="sn-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
-      </div>
-
-      ${analysis.followUpCommitment ? `
-      <div style="background:var(--blue-dim);border:1px solid rgba(79,142,247,.2);border-radius:var(--radius-sm);padding:12px">
-        <div class="field-label" style="margin-bottom:6px;color:var(--blue)">📅 Follow-up Detected</div>
-        <div style="font-size:13px;color:var(--text);margin-bottom:8px">"${analysis.followUpCommitment}"</div>
-        ${followUpDateStr ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Suggested date: <strong style="color:var(--text)">${followUpDateStr}</strong></div>` : ''}
-        <input type="datetime-local" id="followup-datetime"
-          value="${analysis.followUpDate ? analysis.followUpDate.slice(0,16) : ''}"
-          style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
-          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
-        </div>
-      </div>` : `
-      <div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px">
-        <div class="field-label" style="margin-bottom:6px">📅 Schedule Follow-up</div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:8px">No follow-up commitment detected — set one manually:</div>
-        <input type="datetime-local" id="followup-datetime"
-          style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
-          <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
-        </div>
-      </div>`}
-
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveCallNotes('${companyId}')">
-          💾 Save Call Notes to HubSpot
-        </button>
-        <button class="btn" style="flex:1;justify-content:center" onclick="showTranscript(\`${transcript.replace(/`/g, '\\`').replace(/\$/g, '\\$').slice(0, 5000)}\`)">
-          📄 View transcript
-        </button>
-      </div>
-    </div>`;
-
-  document.getElementById('modal-footer').innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
-}
+        <textarea id="call-notes-input" style="width:100%;min-height:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${analysis.callNotes || ''}</te
 
 async function createCalendarEvent(companyId) {
   const c = state.contacts.find(x => x.id === companyId);
@@ -1696,6 +1782,66 @@ function showTranscript(transcript) {
       <div class="field-label" style="margin-bottom:8px">Full Transcript</div>
       <div style="background:var(--bg3);border-radius:6px;padding:12px;font-size:12px;color:var(--text2);line-height:1.8;max-height:400px;overflow-y:auto;white-space:pre-wrap">${transcript}</div>
     </div>`;
+}
+
+function setScore(area, score) {
+  state.coachingScores = state.coachingScores || {};
+  state.coachingScores[area] = score;
+  [1,2,3,4,5].forEach(n => {
+    const btn = document.getElementById(`score-${area}-${n}`);
+    if (btn) {
+      btn.style.background = n === score ? 'var(--amber)' : 'var(--bg3)';
+      btn.style.color = n === score ? '#fff' : 'var(--text2)';
+    }
+  });
+}
+
+async function saveDemoNotes(companyId) {
+  const fields = [
+    ['Experience with Current Provider', 'dn-experience'],
+    ['Business Goals', 'dn-goals'],
+    ['Current Marketing', 'dn-marketing'],
+    ['Anticipated Objections', 'dn-objections'],
+    ['Pain / Leverage Points', 'dn-leverage'],
+    ['Sole Decision Maker?', 'dn-dm'],
+    ['Contact Info', 'dn-contact'],
+    ['Demo Date / Time', 'dn-demo'],
+    ['Additional Notes', 'dn-additional'],
+  ];
+  const body = `🎯 DEMO SET NOTES\n\n` + fields.map(([label, id]) => `${label}:\n${document.getElementById(id)?.value || '—'}`).join('\n\n');
+  try {
+    await hsPost('/crm/v3/objects/notes', {
+      properties: { hs_note_body: body, hs_timestamp: Date.now() },
+      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
+    });
+    const msg = document.getElementById('dn-save-msg');
+    if (msg) msg.textContent = '✓ Saved to HubSpot!';
+    toast('Demo notes saved to HubSpot ✓', 'success');
+  } catch { toast('Failed to save demo notes', 'error'); }
+}
+
+async function saveCoachingNotes(companyId) {
+  const areas = ['intro','elevatorPitch','otf','settingDemo','website','confirmingDMs','recap','pace','tonality','listening','communication','tailoredPitch'];
+  const areaLabels = { intro:'Intro', elevatorPitch:'Elevator Pitch', otf:'Shoot for the OTF', settingDemo:'Setting the Demo', website:'Website Situation', confirmingDMs:'Confirming DMs', recap:'Research & Recap', pace:'Pace', tonality:'Tonality', listening:'Active Listening', communication:'Communication', tailoredPitch:'Tailored Pitch' };
+  const scores = state.coachingScores || {};
+  const lines = areas.map(a => {
+    const score = scores[a] || '—';
+    const notes = document.getElementById(`coaching-${a}`)?.value || '';
+    return `${areaLabels[a]}: ${score}/5\n${notes}`;
+  });
+  const overall = document.getElementById('coaching-overall')?.value || '';
+  const total = Object.values(scores).reduce((s, n) => s + n, 0);
+  const avg = Object.keys(scores).length ? (total / Object.keys(scores).length).toFixed(1) : '—';
+  const body = `🏆 COACHING SCORECARD\nAverage Score: ${avg}/5\n\n` + lines.join('\n\n') + (overall ? `\n\nOverall Feedback:\n${overall}` : '');
+  try {
+    await hsPost('/crm/v3/objects/notes', {
+      properties: { hs_note_body: body, hs_timestamp: Date.now() },
+      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
+    });
+    const msg = document.getElementById('cn-save-msg');
+    if (msg) msg.textContent = '✓ Saved to HubSpot!';
+    toast('Coaching notes saved to HubSpot ✓', 'success');
+  } catch { toast('Failed to save coaching notes', 'error'); }
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
