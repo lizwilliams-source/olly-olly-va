@@ -1658,7 +1658,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
       { key: 'communication', label: 'Communication', q: 'Did the rep avoid verbal crutches and communicate clearly?' },
       { key: 'tailoredPitch', label: 'Tailored Pitch', q: 'Did the rep tailor the pitch to the DM\'s unique situation?' },
     ];
-    typeBlock = `
+    typeBlock += `
       <div style="background:linear-gradient(135deg,rgba(245,166,35,.06),rgba(240,82,82,.04));border:1px solid rgba(245,166,35,.2);border-radius:var(--radius);padding:14px">
         <div style="font-size:12px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">🏆 Coaching Scorecard</div>
         <div style="font-size:11px;color:var(--text2);margin-bottom:14px">Score each area 1–5. AI pre-fills based on the transcript — edit as needed.</div>
