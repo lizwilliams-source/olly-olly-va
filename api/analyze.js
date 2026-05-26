@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') return res.statugs(200).end();
 
   try {
     const { transcript, companyName } = req.body;
@@ -47,6 +47,7 @@ Extract and return ONLY a JSON object with these fields:
 
     const analysisText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     if (!analysisText) throw new Error('Gemini returned empty response');
+    console.log('GEMINI RAW:', analysisText.slice(0, 500));
 
     const usage = data.usageMetadata || {};
 
