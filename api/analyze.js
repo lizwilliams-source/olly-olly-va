@@ -64,9 +64,10 @@ Extract and return ONLY a JSON object with these fields:
     let analysis;
     try {
       const clean = analysisText.replace(/```json|```/g, '').trim();
-      analysis = JSON.parse(clean);
+      const jsonMatch = clean.match(/\{[\s\S]*\}/);
+      analysis = JSON.parse(jsonMatch ? jsonMatch[0] : clean);
     } catch {
-      analysis = { summary: 'Could not parse analysis', callNotes: transcript };
+      analysis = { summary: 'Could not parse analysis', callNotes: analysisText };
     }
 
     return res.status(200).json({ analysis });
