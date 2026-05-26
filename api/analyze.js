@@ -29,17 +29,14 @@ export default async function handler(req, res) {
     "primaryServices": "What are the top services they provide or want to showcase?"
   }`;
 
-    const demoFields = `
+const demoFields = `
   "demoNotes": {
-    "currentProviderExperience": "Their experience with current provider or lead gen company",
-    "businessGoals": "Goals for the business — additional jobs per week/month, anything else",
-    "currentMarketing": "What marketing are they currently doing?",
-    "anticipatedObjections": "What objections do you anticipate based on the call?",
-    "painLeverage": "What are the key pain points and leverage points?",
-    "soleDecisionMaker": "Are they the sole decision maker? Who else is involved?",
-    "contactInfo": "Contact info mentioned on the call",
-    "demoDateTime": "Demo date and time if mentioned, or null",
-    "additional": "Anything additional worth noting"
+    "currentMarketing": "What marketing are they currently doing? Always include: website (do they have one, who manages it, how it performs), lead generation sources (Angi, HomeAdvisor, Thumbtack, Google Ads, etc), other marketing strategies (social media, email, direct mail, etc), and word of mouth (how much of their business comes from referrals and repeat customers). Be specific with names, costs, and details mentioned.",
+    "businessGoals": "Goals for the business including job gap, revenue gap, how many more jobs per week or month they want, and anything else they want to focus on",
+    "marketingHistory": "Their full marketing history — current provider name and how long they've been with them, what they pay, what services they get, what's working, what's not working, any previous providers, any bad experiences. Always include: website management, lead generation sources, other marketing strategies, and word of mouth. Be specific with names, costs, and details mentioned.",
+    "anticipatedObjections": "What objections do you anticipate going into the demo based on this call?",
+    "biggestPainPoints": "What are their biggest pain points — what is hurting them most right now?",
+    "soleDecisionMaker": "Are they the sole decision maker? If not, who else is involved and what is their role?"
   }`;
 
 const coachingFields = `
