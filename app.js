@@ -1626,6 +1626,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
     typeBlock = `
       <div style="background:linear-gradient(135deg,rgba(62,207,142,.06),rgba(79,142,247,.06));border:1px solid rgba(62,207,142,.2);border-radius:var(--radius);padding:14px">
         <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">🎯 Set Call Notes</div>
+        ${[
           { id: 'dn-marketing', label: 'Current Marketing / Initial Pain', val: dn.currentMarketing },
           { id: 'dn-goals', label: 'Goals for Business (job gap, revenue gap, etc)', val: dn.businessGoals },
           { id: 'dn-history', label: 'Marketing History & Pain Points', val: dn.marketingHistory },
