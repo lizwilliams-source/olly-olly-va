@@ -1399,7 +1399,7 @@ async function openCallLogger(companyId) {
           ${[
             { key: 'general', icon: '📝', label: 'General Notes', desc: 'Summary, call notes, and follow-up scheduling' },
             { key: 'sales', icon: '📊', label: 'Sales Notes', desc: 'Goals, pain points, current provider, primary services' },
-            { key: 'demo', icon: '🎯', label: 'Demo Set Notes', desc: 'Experience with provider, objections, decision maker, demo time' },
+            { key: 'demo', icon: '🎯', label: 'Set Call Notes', desc: 'Current marketing, pain points, objections, decision maker info' },
             { key: 'coaching', icon: '🏆', label: 'Coaching Notes', desc: 'Full scorecard — intro, pitch, tonality, listening, and more' },
           ].map(t => `
             <div class="call-type-option" data-type="${t.key}" onclick="selectCallType('${t.key}')"
@@ -1625,17 +1625,13 @@ function showCallAnalysis(companyId, transcript, analysis) {
     const dn = analysis.demoNotes || {};
     typeBlock = `
       <div style="background:linear-gradient(135deg,rgba(62,207,142,.06),rgba(79,142,247,.06));border:1px solid rgba(62,207,142,.2);border-radius:var(--radius);padding:14px">
-        <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">🎯 Demo Set Notes</div>
-        ${[
-          { id: 'dn-experience', label: 'Experience with Current Provider (Lead Gen or Competitor)', val: dn.currentProviderExperience },
-          { id: 'dn-goals', label: 'Goals for Business (jobs per week/month, focus areas)', val: dn.businessGoals },
-          { id: 'dn-marketing', label: 'Current Marketing', val: dn.currentMarketing },
+        <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">🎯 Set Call Notes</div>
+          { id: 'dn-marketing', label: 'Current Marketing / Initial Pain', val: dn.currentMarketing },
+          { id: 'dn-goals', label: 'Goals for Business (job gap, revenue gap, etc)', val: dn.businessGoals },
+          { id: 'dn-history', label: 'Marketing History & Pain Points', val: dn.marketingHistory },
           { id: 'dn-objections', label: 'Anticipated Objections', val: dn.anticipatedObjections },
-          { id: 'dn-leverage', label: 'Anticipated Pain / Leverage Points', val: dn.painLeverage },
+          { id: 'dn-pain', label: 'Biggest Pain Points', val: dn.biggestPainPoints },
           { id: 'dn-dm', label: 'Sole Decision Maker?', val: dn.soleDecisionMaker },
-          { id: 'dn-contact', label: 'Contact Info', val: dn.contactInfo },
-          { id: 'dn-demo', label: 'Demo Date / Time', val: dn.demoDateTime },
-          { id: 'dn-additional', label: 'Anything Additional?', val: dn.additional },
         ].map(f => `
           <div style="margin-bottom:10px">
             <div class="field-label" style="margin-bottom:4px;color:var(--text2)">${f.label}</div>
@@ -1831,17 +1827,14 @@ function setScore(area, score) {
 
 async function saveDemoNotes(companyId) {
   const fields = [
-    ['Experience with Current Provider', 'dn-experience'],
-    ['Business Goals', 'dn-goals'],
-    ['Current Marketing', 'dn-marketing'],
+    ['Current Marketing / Initial Pain', 'dn-marketing'],
+    ['Goals for Business (job gap, revenue gap, etc)', 'dn-goals'],
+    ['Marketing History & Pain Points', 'dn-history'],
     ['Anticipated Objections', 'dn-objections'],
-    ['Pain / Leverage Points', 'dn-leverage'],
+    ['Biggest Pain Points', 'dn-pain'],
     ['Sole Decision Maker?', 'dn-dm'],
-    ['Contact Info', 'dn-contact'],
-    ['Demo Date / Time', 'dn-demo'],
-    ['Additional Notes', 'dn-additional'],
   ];
-  const body = `🎯 DEMO SET NOTES\n\n` + fields.map(([label, id]) => `${label}:\n${document.getElementById(id)?.value || '—'}`).join('\n\n');
+  const body = `🎯 SET CALL NOTES\n\n` + fields.map(([label, id]) => `${label}:\n${document.getElementById(id)?.value || '—'}`).join('\n\n');
   try {
     await hsPost('/crm/v3/objects/notes', {
       properties: { hs_note_body: body, hs_timestamp: Date.now() },
