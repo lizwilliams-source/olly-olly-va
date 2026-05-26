@@ -1002,12 +1002,12 @@ async function loadUsageDashboard(month) {
   const totals = rows.reduce((a, r) => ({
     calls: a.calls + r.calls,
     ai_queries: a.ai_queries + r.ai_queries,
-    gemini_input: a.gemini_input + r.gemini_input,
-    gemini_output: a.gemini_output + r.gemini_output,
-    gemini_cost: a.gemini_cost + r.gemini_cost,
-  }), { calls: 0, ai_queries: 0, gemini_input: 0, gemini_output: 0, gemini_cost: 0 });
+    claude_input: a.claude_input + r.claude_input,
+    claude_output: a.claude_output + r.claude_output,
+    claude_cost: a.claude_cost + r.claude_cost,
+  }), { calls: 0, ai_queries: 0, claude_input: 0, claude_output: 0, claude_cost: 0 });
   el.innerHTML = `
-    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Transcription via Whisper (flat-rate VPS). AI via Gemini 2.5 Flash ($0.15/$0.60 per 1M tokens).</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Transcription via Whisper (flat-rate VPS). AI via Claude Haiku ($0.80/$4.00 per 1M tokens).</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead>
         <tr style="color:var(--text3);text-align:left;border-bottom:1px solid var(--border)">
@@ -1015,8 +1015,8 @@ async function loadUsageDashboard(month) {
           <th style="padding:6px 8px;text-align:center">Calls Transcribed</th>
           <th style="padding:6px 8px;text-align:center">AI Queries</th>
           <th style="padding:6px 8px;text-align:right">Whisper Audio</th>
-          <th style="padding:6px 8px;text-align:right">Gemini Tokens</th>
-          <th style="padding:6px 8px;text-align:right">Gemini Cost</th>
+          <th style="padding:6px 8px;text-align:right">Claude Tokens</th>
+          <th style="padding:6px 8px;text-align:right">Claude Cost</th>
         </tr>
       </thead>
       <tbody>
@@ -1026,16 +1026,16 @@ async function loadUsageDashboard(month) {
             <td style="padding:8px;text-align:center;color:var(--text2)">${r.calls}</td>
             <td style="padding:8px;text-align:center;color:var(--text2)">${r.ai_queries}</td>
             <td style="padding:8px;text-align:right;color:var(--text2)">${fmtMin(r.whisper_seconds)}</td>
-            <td style="padding:8px;text-align:right;color:var(--text2)">${fmtTokens(r.gemini_input + r.gemini_output)}</td>
-            <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(r.gemini_cost)}</td>
+            <td style="padding:8px;text-align:right;color:var(--text2)">${fmtTokens(r.claude_input + r.claude_output)}</td>
+            <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmt(r.claude_cost)}</td>
           </tr>`).join('')}
         <tr style="border-top:2px solid var(--border)">
           <td style="padding:8px;font-weight:600;color:var(--text)">Total</td>
           <td style="padding:8px;text-align:center;font-weight:600;color:var(--text)">${totals.calls}</td>
           <td style="padding:8px;text-align:center;font-weight:600;color:var(--text)">${totals.ai_queries}</td>
           <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">—</td>
-          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmtTokens(totals.gemini_input + totals.gemini_output)}</td>
-          <td style="padding:8px;text-align:right;font-weight:600;color:var(--green)">${fmt(totals.gemini_cost)}</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--text)">${fmtTokens(totals.claude_input + totals.claude_output)}</td>
+          <td style="padding:8px;text-align:right;font-weight:600;color:var(--green)">${fmt(totals.claude_cost)}</td>
         </tr>
       </tbody>
     </table>`;
