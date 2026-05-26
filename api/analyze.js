@@ -42,20 +42,20 @@ export default async function handler(req, res) {
     "additional": "Anything additional worth noting"
   }`;
 
-    const coachingFields = `
+const coachingFields = `
   "coachingNotes": {
-    "intro": { "score": 1-5, "notes": "Feedback on intro" },
-    "elevatorPitch": { "score": 1-5, "notes": "Feedback on probing questions and active listening" },
-    "otf": { "score": 1-5, "notes": "Feedback on confidence assuming time and avoiding objections" },
-    "settingDemo": { "score": 1-5, "notes": "Feedback on uncovering DM needs" },
-    "website": { "score": 1-5, "notes": "Feedback on website pain point questions" },
-    "confirmingDMs": { "score": 1-5, "notes": "Feedback on confirming decision makers" },
-    "recap": { "score": 1-5, "notes": "Feedback on recap and confirming time" },
-    "pace": { "score": 1-5, "notes": "Feedback on pace" },
-    "tonality": { "score": 1-5, "notes": "Feedback on tonality" },
-    "listening": { "score": 1-5, "notes": "Feedback on active listening" },
-    "communication": { "score": 1-5, "notes": "Feedback on avoiding verbal crutches" },
-    "tailoredPitch": { "score": 1-5, "notes": "Feedback on tailoring pitch to DM" },
+    "intro": { "score": 3, "notes": "Feedback on intro" },
+    "elevatorPitch": { "score": 3, "notes": "Feedback on probing questions and active listening" },
+    "otf": { "score": 3, "notes": "Feedback on confidence assuming time and avoiding objections" },
+    "settingDemo": { "score": 3, "notes": "Feedback on uncovering DM needs" },
+    "website": { "score": 3, "notes": "Feedback on website pain point questions" },
+    "confirmingDMs": { "score": 3, "notes": "Feedback on confirming decision makers" },
+    "recap": { "score": 3, "notes": "Feedback on recap and confirming time" },
+    "pace": { "score": 3, "notes": "Feedback on pace" },
+    "tonality": { "score": 3, "notes": "Feedback on tonality" },
+    "listening": { "score": 3, "notes": "Feedback on active listening" },
+    "communication": { "score": 3, "notes": "Feedback on avoiding verbal crutches" },
+    "tailoredPitch": { "score": 3, "notes": "Feedback on tailoring pitch to DM" },
     "overall": "Overall coaching feedback and top 2-3 things to improve"
   }`;
 
