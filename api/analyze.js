@@ -2,13 +2,11 @@ import { getSession, logUsage } from './_helpers.js';
 
 export const config = { maxDuration: 60 };
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.statugs(200).end();
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     const { transcript, companyName } = req.body;
@@ -19,7 +17,7 @@ export default async function handler(req, res) {
 Company: ${companyName || 'Unknown'}
 Transcript: ${transcript}
 
-Extract and return ONLY a JSON object with these fields:
+Extract and return ONLY a JSON object with these fields, no other text:
 {
   "summary": "2-3 sentence summary of the call",
   "callNotes": "Detailed notes about what was discussed, objections, interest level, next steps",
@@ -30,34 +28,33 @@ Extract and return ONLY a JSON object with these fields:
   "interested": true or false
 }`;
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 1000 },
-        }),
-      }
-    );
+    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
 
-    const data = await geminiRes.json();
-    if (!geminiRes.ok) throw new Error(`Gemini API error: ${data.error?.message || JSON.stringify(data)}`);
+    const data = await anthropicRes.json();
+    if (!anthropicRes.ok) throw new Error(`Anthropic error: ${data.error?.message || JSON.stringify(data)}`);
 
-    const analysisText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    if (!analysisText) throw new Error('Gemini returned empty response');
-    console.log('GEMINI RAW:', analysisText.slice(0, 500));
-
-    const usage = data.usageMetadata || {};
+    const analysisText = data.content?.[0]?.text || '';
+    if (!analysisText) throw new Error('Claude returned empty response');
 
     // Log usage async
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await getSession(token);
     if (session?.email) {
       logUsage(session.email, {
-        claude_input: usage.promptTokenCount || 0,
-        claude_output: usage.candidatesTokenCount || 0,
+        claude_input: data.usage?.input_tokens || 0,
+        claude_output: data.usage?.output_tokens || 0,
         calls: 1,
       }).catch(() => {});
     }
