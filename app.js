@@ -1905,7 +1905,7 @@ async function pickFromHubSpot(companyId) {
             value: companyId,
           }]
         }],
-        properties: ['hs_call_title', 'hs_call_recording_url', 'hs_timestamp', 'hs_call_duration', 'hs_call_status', 'hs_call_disposition],
+        properties: ['hs_call_title', 'hs_call_recording_url', 'hs_timestamp', 'hs_call_duration', 'hs_call_status', 'hs_call_disposition'],
         sorts: [{ propertyName: 'hs_timestamp', direction: 'DESCENDING' }],
         limit: 10,
       }),
