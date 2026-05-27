@@ -1911,6 +1911,11 @@ async function pickFromHubSpot(companyId) {
       }),
     });
     const data = await res.json();
+    console.log('RAW CALLS:', JSON.stringify(data.results?.map(c => ({ 
+      title: c.properties.hs_call_title,
+      disposition: c.properties.hs_call_disposition,
+      recording: !!c.properties.hs_call_recording_url
+    }))));
     const calls = (data.results || []).filter(c => 
       c.properties.hs_call_recording_url &&
       (c.properties.hs_call_disposition || '').toLowerCase() !== 'no message left'
