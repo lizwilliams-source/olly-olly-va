@@ -1432,6 +1432,11 @@ async function openCallLogger(companyId) {
             <button class="btn btn-primary" style="justify-content:center;width:100%;margin-bottom:8px" onclick="document.getElementById('audio-upload').click()">
               📁 Choose recording file
             </button>
+            ${state.isAdmin ? `
+            <div style="text-align:center;font-size:11px;color:var(--text3);margin:8px 0">— or —</div>
+            <button class="btn" style="justify-content:center;width:100%;margin-bottom:8px;color:var(--blue);border-color:rgba(79,142,247,.3)" onclick="pickFromHubSpot('${companyId}')">
+              📞 Pick from HubSpot calls (beta)
+            </button>` : ''}
             <div style="font-size:11px;color:var(--text3);text-align:center">Supports MP3, MP4, M4A, WAV</div>
           </div>
         </div>
@@ -1877,6 +1882,157 @@ const body = `<h3>🏆 COACHING SCORECARD — Average Score: ${avg}/5</h3>` +
     if (msg) msg.textContent = '✓ Saved to HubSpot!';
     toast('Coaching notes saved to HubSpot ✓', 'success');
   } catch { toast('Failed to save coaching notes', 'error'); }
+}
+
+async function pickFromHubSpot(companyId) {
+  const btn = document.querySelector('[onclick^="pickFromHubSpot"]');
+  if (btn) { btn.textContent = '⏳ Loading calls...'; btn.disabled = true; }
+
+  try {
+    // Fetch recent calls associated with this company
+    const res = await fetch('/api/hubspot', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-HubSpot-Path': `/crm/v3/objects/calls/search`,
+        'X-HubSpot-Method': 'POST',
+      },
+      body: JSON.stringify({
+        filterGroups: [{
+          filters: [{
+            propertyName: 'associations.company',
+            operator: 'EQ',
+            value: companyId,
+          }]
+        }],
+        properties: ['hs_call_title', 'hs_call_recording_url', 'hs_timestamp', 'hs_call_duration', 'hs_call_status'],
+        sorts: [{ propertyName: 'hs_timestamp', direction: 'DESCENDING' }],
+        limit: 10,
+      }),
+    });
+    const data = await res.json();
+    const calls = (data.results || []).filter(c => c.properties.hs_call_recording_url);
+
+    if (!calls.length) {
+      toast('No calls with recordings found in HubSpot for this company', 'error');
+      if (btn) { btn.textContent = '📞 Pick from HubSpot calls (beta)'; btn.disabled = false; }
+      return;
+    }
+
+    // Show call picker
+    const picker = document.createElement('div');
+    picker.style.cssText = 'margin-top:12px;border-top:1px solid var(--border);padding-top:12px';
+    picker.innerHTML = `
+      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:8px">Select a call recording:</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${calls.map(call => {
+          const date = call.properties.hs_timestamp
+            ? new Date(parseInt(call.properties.hs_timestamp)).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })
+            : 'Unknown date';
+          const duration = call.properties.hs_call_duration
+            ? `${Math.round(parseInt(call.properties.hs_call_duration) / 60000)}m`
+            : '';
+          const title = call.properties.hs_call_title || 'Call';
+          return `
+            <div onclick="useHubSpotRecording('${companyId}', '${encodeURIComponent(call.properties.hs_call_recording_url)}')"
+              style="padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;transition:all .15s"
+              onmouseover="this.style.borderColor='var(--blue)'" onmouseout="this.style.borderColor='var(--border)'">
+              <div style="font-size:13px;font-weight:600;color:var(--text)">${title}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">${date}${duration ? ` · ${duration}` : ''}</div>
+            </div>`;
+        }).join('')}
+      </div>`;
+
+    const uploadSection = document.getElementById('upload-section');
+    const existing = uploadSection.querySelector('.hs-call-picker');
+    if (existing) existing.remove();
+    picker.className = 'hs-call-picker';
+    uploadSection.appendChild(picker);
+    if (btn) { btn.textContent = '📞 Pick from HubSpot calls (beta)'; btn.disabled = false; }
+
+  } catch (e) {
+    toast('Failed to load HubSpot calls: ' + e.message, 'error');
+    if (btn) { btn.textContent = '📞 Pick from HubSpot calls (beta)'; btn.disabled = false; }
+  }
+}
+
+async function useHubSpotRecording(companyId, encodedUrl) {
+  const recordingUrl = decodeURIComponent(encodedUrl);
+  const c = state.contacts.find(x => x.id === companyId);
+
+  document.getElementById('call-logger-content').innerHTML = `
+    <div style="padding:24px 8px">
+      <div id="transcribe-status" style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;text-align:center">Downloading recording...</div>
+      <div style="background:var(--bg3);border-radius:99px;height:8px;overflow:hidden">
+        <div id="transcribe-bar" style="height:100%;width:20%;background:var(--blue);border-radius:99px;transition:width 0.4s ease"></div>
+      </div>
+      <div id="transcribe-elapsed" style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px">Fetching from HubSpot...</div>
+    </div>`;
+
+  state.transcribing = true;
+  try {
+    // Download the recording from HubSpot
+    const audioRes = await fetch(recordingUrl);
+    if (!audioRes.ok) throw new Error('Failed to download recording from HubSpot');
+    const audioBlob = await audioRes.blob();
+
+    document.getElementById('transcribe-status').textContent = 'Uploading to transcription server...';
+    document.getElementById('transcribe-bar').style.width = '30%';
+
+    // Get whisper server config
+    const { url: whisperUrl, key: whisperKey } = await fetch('/api/transcribe').then(r => r.json());
+
+    // Send to whisper
+    const uploadRes = await fetch(`${whisperUrl}/transcribe`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${whisperKey}`, 'Content-Type': 'application/octet-stream' },
+      body: audioBlob,
+    });
+    const uploadData = await uploadRes.json();
+    if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadData.detail || uploadData.error}`);
+    const { job_id } = uploadData;
+
+    // Poll for completion
+    document.getElementById('transcribe-status').textContent = 'Transcribing...';
+    document.getElementById('transcribe-bar').style.width = '40%';
+    const transcribeStart = Date.now();
+    while (true) {
+      await new Promise(r => setTimeout(r, 3000));
+      const statusRes = await fetch(`${whisperUrl}/status/${job_id}`, {
+        headers: { 'Authorization': `Bearer ${whisperKey}` },
+      });
+      const statusData = await statusRes.json();
+      if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
+      if (statusData.status === 'done') {
+        // Analyze
+        document.getElementById('transcribe-bar').style.width = '100%';
+        document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
+        const analysisRes = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+          body: JSON.stringify({ transcript: statusData.transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false }),
+        });
+        const analysisJson = await analysisRes.json();
+        if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error}`);
+        state.transcribing = false;
+        showCallAnalysis(companyId, statusData.transcript, analysisJson.analysis);
+        return;
+      }
+      const elapsed = Math.round((Date.now() - transcribeStart) / 1000);
+      const progress = Math.min(90, 40 + (elapsed / 180) * 50);
+      document.getElementById('transcribe-bar').style.width = `${progress}%`;
+      document.getElementById('transcribe-elapsed').textContent = `${elapsed}s`;
+    }
+  } catch (e) {
+    state.transcribing = false;
+    document.getElementById('call-logger-content').innerHTML = `
+      <div style="text-align:center;padding:20px">
+        <div style="font-size:36px;margin-bottom:12px">❌</div>
+        <div style="font-size:14px;font-weight:600;color:var(--red);margin-bottom:8px">Failed</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:16px">${e.message}</div>
+        <button class="btn btn-primary" onclick="openCallLogger('${companyId}')">Try again</button>
+      </div>`;
+  }
 }
 
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
