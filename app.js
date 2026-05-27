@@ -1905,13 +1905,16 @@ async function pickFromHubSpot(companyId) {
             value: companyId,
           }]
         }],
-        properties: ['hs_call_title', 'hs_call_recording_url', 'hs_timestamp', 'hs_call_duration', 'hs_call_status'],
+        properties: ['hs_call_title', 'hs_call_recording_url', 'hs_timestamp', 'hs_call_duration', 'hs_call_status', 'hs_call_disposition],
         sorts: [{ propertyName: 'hs_timestamp', direction: 'DESCENDING' }],
         limit: 10,
       }),
     });
     const data = await res.json();
-    const calls = (data.results || []).filter(c => c.properties.hs_call_recording_url);
+    const calls = (data.results || []).filter(c => 
+      c.properties.hs_call_recording_url &&
+      (c.properties.hs_call_disposition || '').toLowerCase() !== 'no message left'
+    );
 
     if (!calls.length) {
       toast('No calls with recordings found in HubSpot for this company', 'error');
