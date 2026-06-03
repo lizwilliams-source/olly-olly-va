@@ -568,6 +568,8 @@ function buildScheduleHTML(allTasks, calEvents, viewDate) {
     </div>`;
   };
 
+  const autoLink = (text) => text.replace(/(https?:\/\/[^\s<>"]+)/g, u => `<a href="${u}" target="_blank" style="color:var(--blue);text-decoration:underline;word-break:break-all">${u}</a>`);
+
   const eventCard = (ev) => {
     const d = ev.start?.dateTime ? new Date(ev.start.dateTime) : null;
     const timeStr = d ? d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }) : 'All day';
@@ -576,7 +578,9 @@ function buildScheduleHTML(allTasks, calEvents, viewDate) {
     const durStr = dur ? (dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ' ' + dur%60 + 'm' : ''}` : `${dur}m`) : '';
     const hsMatch = ev.description?.match(/https:\/\/app\.hubspot\.com\/contacts\/\d+\/company\/\d+/);
     const hsUrl = hsMatch?.[0] || (ev.id ? state.eventHsCache[ev.id] : null) || null;
-    const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').replace(/HubSpot:.*$/m, '').trim().slice(0, 120) : null;
+    const rawDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').replace(/HubSpot:.*$/m, '').trim().slice(0, 300) : null;
+    const cleanDesc = rawDesc ? autoLink(rawDesc) : null;
+    const locationHtml = ev.location ? autoLink(ev.location) : null;
     const tagKey = demoTagKey(ev);
     const isDemo = isTaggedDemo(ev);
     return `<div data-tag-key="${tagKey}" style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isDemo ? '#f59e0b' : 'var(--blue)'};border-radius:var(--radius)">
@@ -589,7 +593,7 @@ function buildScheduleHTML(allTasks, calEvents, viewDate) {
         </div>
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px">${timeStr}${durStr ? ' · ' + durStr : ''}</div>
-      ${ev.location ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">📍 ${ev.location}</div>` : ''}
+      ${locationHtml ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">📍 ${locationHtml}</div>` : ''}
       ${cleanDesc ? `<div style="font-size:12px;color:var(--text2);margin-top:5px;line-height:1.5">${cleanDesc}</div>` : ''}
       ${ev.attendees?.length ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">👥 ${ev.attendees.join(', ')}</div>` : ''}
     </div>`;
