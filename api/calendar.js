@@ -96,8 +96,8 @@ export default async function handler(req, res) {
     const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
     const params = new URLSearchParams({
-      timeMin: startOfDay.toISOString(),
-      timeMax: endOfDay.toISOString(),
+      timeMin: req.query.timeMin || startOfDay.toISOString(),
+      timeMax: req.query.timeMax || endOfDay.toISOString(),
       singleEvents: 'true',
       orderBy: 'startTime',
       maxResults: '50',

@@ -16,6 +16,8 @@ const state = {
   activeQueueId: null,
   pipeline: [],
   pipelineSortByStage: false,
+  demoTags: {},
+  demoAcks: {},
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
@@ -456,9 +458,12 @@ async function renderDashboard() {
 
   updateDashboardCounts();
 
+  const _now = new Date(), _s = new Date(_now), _e = new Date(_now);
+  _s.setHours(0,0,0,0); _e.setHours(23,59,59,999);
+  const _calParams = new URLSearchParams({ action: 'events', timeMin: _s.toISOString(), timeMax: _e.toISOString() });
   const [tasksRes, calRes] = await Promise.all([
     fetch('/api/hubspot?action=tasks', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ tasks: [] })),
-    fetch('/api/calendar?action=events', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ events: [] })),
+    fetch(`/api/calendar?${_calParams}`, { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ events: [] })),
   ]);
   state._cachedTasks = tasksRes.tasks || [];
   state._cachedCalEvents = calRes.events || [];
@@ -521,18 +526,21 @@ function buildScheduleHTML(allTasks, calEvents) {
   };
 
   const eventCard = (ev) => {
-    const d = new Date(ev.start.dateTime);
-    const timeStr = d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+    const d = ev.start?.dateTime ? new Date(ev.start.dateTime) : null;
+    const timeStr = d ? d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }) : 'All day';
     const endD = ev.end?.dateTime ? new Date(ev.end.dateTime) : null;
-    const dur = endD ? Math.round((endD - d) / 60000) : null;
+    const dur = d && endD ? Math.round((endD - d) / 60000) : null;
     const durStr = dur ? (dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ' ' + dur%60 + 'm' : ''}` : `${dur}m`) : '';
-    const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').trim().slice(0, 120) : null;
+    const hsMatch = ev.description?.match(/https:\/\/app\.hubspot\.com\/contacts\/\d+\/company\/\d+/);
+    const hsUrl = hsMatch?.[0] || null;
+    const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').replace(/HubSpot:.*$/m, '').trim().slice(0, 120) : null;
     const tagKey = demoTagKey(ev);
     const isDemo = isTaggedDemo(ev);
     return `<div data-tag-key="${tagKey}" style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isDemo ? '#f59e0b' : 'var(--blue)'};border-radius:var(--radius)">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="font-size:13px;font-weight:600;color:var(--text)"><span class="event-icon">${isDemo ? '🎯' : '📅'}</span> ${ev.summary || 'Event'}</div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          ${hsUrl ? `<a href="${hsUrl}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;white-space:nowrap">HS ↗</a>` : ''}
           ${ev.htmlLink ? `<a href="${ev.htmlLink}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;white-space:nowrap">Cal ↗</a>` : ''}
           <button class="demo-tag-btn" onclick="toggleDemoTag('${tagKey}')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${isDemo ? 'rgba(245,158,11,.4)' : 'var(--border2)'};background:${isDemo ? 'rgba(245,158,11,.15)' : 'transparent'};color:${isDemo ? '#f59e0b' : 'var(--text3)'};cursor:pointer;white-space:nowrap">${isDemo ? '🎯 Demo' : 'Mark Demo'}</button>
         </div>
@@ -593,7 +601,7 @@ function buildScheduleHTML(allTasks, calEvents) {
 
   if (overdue.length) html += `<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚠️ Overdue — ${overdue.length}</div><div style="display:flex;flex-direction:column;gap:6px">${overdue.map(t => taskCard(t, true)).join('')}</div></div>`;
 
-  if (untimedItems.length) html += `<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Due Today</div><div style="display:flex;flex-direction:column;gap:6px">${untimedItems.map(item => item.kind === 'allday' ? `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius)"><div style="font-size:13px;font-weight:600;color:var(--text)">📅 ${item.data.summary || 'All-day event'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">All day</div></div>` : taskCard(item.data)).join('')}</div></div>`;
+  if (untimedItems.length) html += `<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Due Today</div><div style="display:flex;flex-direction:column;gap:6px">${untimedItems.map(item => item.kind === 'allday' ? eventCard(item.data) : taskCard(item.data)).join('')}</div></div>`;
 
   if (!overdue.length && !timedItems.length && !untimedItems.length) html = `<div style="text-align:center;padding:60px 20px;color:var(--text2)"><div style="font-size:40px;margin-bottom:12px">🎉</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">All caught up</div><div style="font-size:13px">No tasks or events today.</div></div>`;
 
@@ -1465,7 +1473,7 @@ let refreshInterval = null;
 
 async function init() {
   showView('dashboard');
-  await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels()]);
+  await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels(), loadDemoTags()]);
   if (state.currentView === 'dashboard') showView('dashboard');
   loadDailyBriefing();
   startAutoRefresh();
@@ -1502,7 +1510,9 @@ async function loadDailyBriefing() {
 
   let calendarContext = '';
   try {
-    const calRes = await fetch('/api/calendar?action=events', { headers: { Authorization: `Bearer ${state.token}` } });
+    const _cn = new Date(), _cs = new Date(_cn), _ce = new Date(_cn);
+    _cs.setHours(0,0,0,0); _ce.setHours(23,59,59,999);
+    const calRes = await fetch(`/api/calendar?${new URLSearchParams({ action:'events', timeMin:_cs.toISOString(), timeMax:_ce.toISOString() })}`, { headers: { Authorization: `Bearer ${state.token}` } });
     const calData = await calRes.json();
     if (calData.events?.length) {
       const eventList = calData.events.map(e => {
@@ -2488,12 +2498,26 @@ state._availableCalendars = [];
 
 async function loadCalendarEvents() {
   try {
-    const res = await fetch('/api/calendar?action=events', { headers: { Authorization: `Bearer ${state.token}` } });
+    const now = new Date();
+    const s = new Date(now); s.setHours(0,0,0,0);
+    const e = new Date(now); e.setHours(23,59,59,999);
+    const params = new URLSearchParams({ action: 'events', timeMin: s.toISOString(), timeMax: e.toISOString() });
+    const res = await fetch(`/api/calendar?${params}`, { headers: { Authorization: `Bearer ${state.token}` } });
     const data = await res.json();
     if (data.events) state.calendarEvents = data.events;
     if (data.calendars) state._availableCalendars = data.calendars;
   } catch {}
   renderDemoBanner();
+}
+
+async function loadDemoTags() {
+  try {
+    const res = await fetch('/api/users?action=getdemotags', { headers: { Authorization: `Bearer ${state.token}` } });
+    if (!res.ok) return;
+    const { tags, acks } = await res.json();
+    state.demoTags = tags || {};
+    state.demoAcks = acks || {};
+  } catch {}
 }
 
 async function loadCalendarPrefs() {
@@ -2506,12 +2530,12 @@ async function loadCalendarPrefs() {
 
 // ─── DEMO BLOCKER ─────────────────────────────────────────────────────────────
 function demoAckKey(ev) { return `demo_ack_${ev.summary || ''}_${ev.start?.dateTime || ''}`; }
-function demoTagKey(ev) { return `demo_tag_${ev.id || (ev.summary || '') + '_' + (ev.start?.dateTime || '')}`; }
-function isTaggedDemo(ev) { return !!localStorage.getItem(demoTagKey(ev)); }
+function demoTagKey(ev) { return `demo_tag_${ev.id || (ev.summary || '') + '_' + (ev.start?.dateTime || ev.start?.date || '')}`; }
+function isTaggedDemo(ev) { return !!state.demoTags[demoTagKey(ev)]; }
 function toggleDemoTag(key) {
-  const isNowDemo = !localStorage.getItem(key);
-  if (isNowDemo) localStorage.setItem(key, '1'); else localStorage.removeItem(key);
-  // Update the card in-place — no refetch needed
+  const isNowDemo = !state.demoTags[key];
+  if (isNowDemo) state.demoTags[key] = 1; else delete state.demoTags[key];
+  fetch('/api/users?action=setdemotag', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ key, value: isNowDemo }) }).catch(() => {});
   const card = document.querySelector(`[data-tag-key="${key}"]`);
   if (card) {
     card.style.borderLeftColor = isNowDemo ? '#f59e0b' : 'var(--blue)';
@@ -2535,7 +2559,7 @@ function checkUpcomingDemo() {
     if (!ev.start?.dateTime) return false;
     if (!isTaggedDemo(ev)) return false;
     const s = new Date(ev.start.dateTime).getTime();
-    return s > now && s <= in10 && !localStorage.getItem(demoAckKey(ev));
+    return s > now && s <= in10 && !state.demoAcks[demoAckKey(ev)];
   }) || null;
 }
 
@@ -2606,7 +2630,8 @@ function renderDemoBanner() {
 }
 
 function acknowledgeDemoEvent(ackKey) {
-  localStorage.setItem(ackKey, '1');
+  state.demoAcks[ackKey] = 1;
+  fetch('/api/users?action=ackdemoevent', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ key: ackKey }) }).catch(() => {});
   if (_demoTitleInterval) { clearInterval(_demoTitleInterval); _demoTitleInterval = null; document.title = 'Olly Olly'; }
   if (_demoSirenInterval) { clearInterval(_demoSirenInterval); _demoSirenInterval = null; }
   const f = document.getElementById('demo-screen-flash'); if (f) f.remove();

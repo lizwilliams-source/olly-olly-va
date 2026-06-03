@@ -383,5 +383,36 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  if (action === 'getdemotags') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const tags = await kvGet(`demotags:${session.email}`) || {};
+    const acks = await kvGet(`demoacks:${session.email}`) || {};
+    return res.status(200).json({ tags, acks });
+  }
+
+  if (action === 'setdemotag') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const { key, value } = req.body;
+    const tags = await kvGet(`demotags:${session.email}`) || {};
+    if (value) tags[key] = 1; else delete tags[key];
+    await kvSet(`demotags:${session.email}`, tags);
+    return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'ackdemoevent') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const { key } = req.body;
+    const acks = await kvGet(`demoacks:${session.email}`) || {};
+    acks[key] = 1;
+    await kvSet(`demoacks:${session.email}`, acks);
+    return res.status(200).json({ ok: true });
+  }
+
 return res.status(400).json({ error: 'Unknown action' });
 }
