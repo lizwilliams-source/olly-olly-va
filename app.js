@@ -147,10 +147,14 @@ async function loadContacts(after = null) {
       state.hsConnected = true;
       updateHsStatus(true);
       updateBadges();
+      if (state.currentView === 'contacts') renderContacts();
       // Paginate if more exist
       if (data.paging?.next?.after) {
         loadContacts(data.paging.next.after);
       }
+    } else if (!after) {
+      console.error('HubSpot search error:', data);
+      updateHsStatus(false);
     }
   } catch (e) { console.error('Failed to load companies:', e); updateHsStatus(false); }
 }
@@ -369,6 +373,9 @@ function showView(view) {
   };
   document.getElementById('main').innerHTML = '';
   (views[view] || renderDashboard)();
+  if (view === 'contacts' && !state.contacts.length) {
+    loadContacts().then(() => { if (state.currentView === 'contacts') renderContacts(); });
+  }
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
