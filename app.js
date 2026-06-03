@@ -3040,15 +3040,28 @@ async function applyEmailTemplate(companyId, templateId) {
   const website = c.rawProps?.website || c.rawProps?.domain || '';
 
   try {
-    // Fetch HubSpot contact name + AI findings in parallel
-    const [aiRes, contactRes] = await Promise.all([
-      fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-        system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible-sounding online presence issues for a prospecting email.`,
-        messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with these exact fields:\n- "keyword": the most relevant local search service type for this business (e.g. "plumber", "roofing contractor", "HVAC repair") — single phrase, no location, no brackets\n- "finding1": completes the sentence "One thing I noticed was ___" — must be a specific, complete observation with no placeholder text or brackets whatsoever. Use the actual company name and location. Conversational, lowercase start. Example: "your Google Business Profile looks like it hasn't been claimed yet — no reviews, missing hours, and the address info seems incomplete."\n- "finding2": completes "I also came across ___" — a different specific issue, no placeholder text or brackets. Example: "that your website doesn't have any location-specific pages for the cities you serve, which likely limits how often you show up in local searches."` }],
-        max_tokens: 400,
-      })}),
+    // Step 1: scrape + contact fetch in parallel (fast)
+    const scrapeParams = new URLSearchParams({ name: c.name, city: c.city || '', state: c.state || '', ...(website ? { website } : {}) });
+    const [contactRes, scrape] = await Promise.all([
       fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})),
+      fetch(`/api/scrape?${scrapeParams}`, { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})),
     ]);
+
+    // Build research context from real data
+    const researchCtx = [
+      scrape.gbpCategory ? `GBP category: ${scrape.gbpCategory}` : '',
+      scrape.gbpFound ? `GBP reviews: ${scrape.gbpReviews ?? 0} reviews${scrape.gbpRating ? ', ' + scrape.gbpRating + ' stars' : ''}` : 'GBP listing: not found on Google',
+      scrape.schemaType ? `Website schema type: ${scrape.schemaType}` : '',
+      scrape.title ? `Website title: ${scrape.title}` : '',
+      scrape.description ? `Website description: ${scrape.description}` : '',
+    ].filter(Boolean).join('\n');
+
+    // Step 2: call AI with real data
+    const aiRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+      system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible findings based on the actual data provided — no placeholders, no brackets, no made-up facts.`,
+      messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\n${website ? 'Website: ' + website : 'No website on file'}\n${notes ? 'Notes:\n' + notes + '\n' : ''}\nResearch data:\n${researchCtx || 'No data available — infer from company name and location only'}\n\nReturn ONLY a JSON object:\n- "keyword": exact service type for local search — derive from GBP category or schema type above (e.g. "plumber", "roofing contractor", "HVAC repair")\n- "finding1": completes "One thing I noticed was ___" — specific, complete, lowercase, reference the actual review count or GBP status from the research data above\n- "finding2": completes "I also came across ___" — different issue, same rules, reference website data if available` }],
+      max_tokens: 450,
+    })});
 
     // Extract first name from first associated contact
     let firstName = '';
@@ -3069,7 +3082,11 @@ async function applyEmailTemplate(companyId, templateId) {
       finding2 = parsed.finding2 || finding2;
       keyword = parsed.keyword || '';
     } catch {}
-    const serpQuery = [keyword, c.city, c.state].filter(Boolean).join(' ');
+    // Prefer GBP category or schema type over AI guess for keyword
+    const bestKeyword = scrape.gbpCategory || scrape.schemaType || keyword;
+    const serpQuery = [bestKeyword, c.city, c.state].filter(Boolean).join(' ');
+    // Use GBP website as fallback if HubSpot has none
+    const effectiveWebsite = website || scrape.gbpWebsite || '';
 
     const senderName = state.user?.name || '[Your Name]';
     const subject = template.subject.replace('[Company Name]', c.name);
@@ -3080,10 +3097,10 @@ async function applyEmailTemplate(companyId, templateId) {
       .replace('[FINDING_1]', finding1)
       .replace('[FINDING_2]', finding2);
 
-    const websiteThumb = website ? `https://image.thum.io/get/width/600/${website}` : '';
+    const websiteThumb = effectiveWebsite ? `https://image.thum.io/get/width/600/${effectiveWebsite}` : '';
     const serpThumb = serpQuery ? `https://image.thum.io/get/width/600/https://www.google.com/search?q=${encodeURIComponent(serpQuery)}` : '';
     state._emailImages = [
-      ...(websiteThumb ? [{ url: websiteThumb, label: `Website: ${website}` }] : []),
+      ...(websiteThumb ? [{ url: websiteThumb, label: `Website: ${effectiveWebsite}` }] : []),
       ...(serpThumb ? [{ url: serpThumb, label: `Search results: "${serpQuery}"` }] : []),
     ];
 
@@ -3092,7 +3109,7 @@ async function applyEmailTemplate(companyId, templateId) {
         <div class="field-label" style="margin-bottom:8px">Screenshots</div>
         <div style="display:flex;flex-direction:column;gap:10px">
           ${websiteThumb ? `<div>
-            <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Website — ${website}</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Website — ${effectiveWebsite}</div>
             <img src="${websiteThumb}" style="width:100%;border-radius:6px;border:1px solid var(--border2);display:block" loading="lazy">
           </div>` : ''}
           ${serpThumb ? `<div>
