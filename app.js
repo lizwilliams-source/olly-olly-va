@@ -2952,49 +2952,16 @@ async function openEmailCompose(companyId, useCallContext = false) {
       if (nr.ok) { const { notes: kv } = await nr.json(); state.notes[companyId] = kv; }
     } catch {}
   }
-  const baseNotes = state.notes[companyId] || [];
-  const displayNotes = [...baseNotes];
-  if (useCallContext && state.lastCallContext && !displayNotes.find(n => n.text === state.lastCallContext)) {
-    displayNotes.unshift({ text: state.lastCallContext, date: 'Current call', type: 'call_analysis' });
+  if (useCallContext && state.lastCallContext) {
+    const existing = state.notes[companyId] || [];
+    if (!existing.find(n => n.text === state.lastCallContext))
+      state.notes[companyId] = [{ text: state.lastCallContext, date: 'Current call', type: 'call_analysis' }, ...existing];
   }
-  state._emailNotes = displayNotes;
-  const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
-  const defaultInstructions = `Write a follow-up email for ${c.name}. Reference their specific situation and pain points from the selected notes. End with a clear next step.`;
-  const notesHtml = displayNotes.length > 0
-    ? displayNotes.slice(0,10).map((n, i) => {
-        const typeLabel = { call_note:'Call', call_analysis:'Call analysis', sales:'Sales notes', set:'Set call', email:'Email sent', note:'Note' }[n.type] || 'Note';
-        return `<label style="display:flex;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;cursor:pointer;align-items:flex-start">
-          <input type="checkbox" class="note-check" data-idx="${i}" ${i===0?'checked':''} style="margin-top:3px;flex-shrink:0;accent-color:var(--blue);cursor:pointer" />
-          <div style="min-width:0"><div style="font-size:11px;color:var(--text3);margin-bottom:2px">${n.date} · ${typeLabel}</div>
-          <div style="font-size:12px;color:var(--text2);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${(n.text||'').slice(0,180)}</div></div>
-        </label>`;
-      }).join('')
-    : `<div style="font-size:12px;color:var(--text3);padding:8px 0">No saved notes yet. Email will use company info only.</div>`;
-
-  const templatesHtml = EMAIL_TEMPLATES.map(t =>
-    `<button class="btn btn-sm" style="font-size:12px" onclick="applyEmailTemplate('${companyId}','${t.id}')">${t.name} ↗</button>`
-  ).join('');
-
   document.getElementById('modal-title').innerHTML = `✉️ Email — ${c.name}`;
-  document.getElementById('modal-body').innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:14px">
-      ${EMAIL_TEMPLATES.length ? `<div><div class="field-label" style="margin-bottom:8px">Templates</div><div style="display:flex;gap:8px;flex-wrap:wrap">${templatesHtml}</div></div><div style="border-top:1px solid var(--border);padding-top:14px"><div class="field-label" style="margin-bottom:8px">Or generate with AI</div></div>` : ''}
-      <div><div class="field-label" style="margin-bottom:8px">Select notes to include</div><div style="display:flex;flex-direction:column;gap:6px">${notesHtml}</div></div>
-      <div><div class="field-label" style="margin-bottom:4px">Tone</div>
-        <select id="email-tone" style="${ta}">
-          <option value="professional">Professional</option>
-          <option value="casual">Casual / Friendly</option>
-          <option value="consultative">Consultative</option>
-          <option value="direct">Direct / No-fluff</option>
-          <option value="warm">Warm / Relationship-focused</option>
-        </select></div>
-      <div><div class="field-label" style="margin-bottom:4px">Instructions <span style="font-size:11px;color:var(--text3);font-weight:400">(edit to customize)</span></div>
-        <textarea id="email-instructions" style="${ta};min-height:80px;font-family:inherit;resize:vertical;line-height:1.6">${defaultInstructions}</textarea></div>
-    </div>`;
-  document.getElementById('modal-footer').innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
-    <button class="btn btn-primary btn-sm" onclick="generateEmailDraft('${companyId}')">Generate Draft →</button>`;
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Preparing email...</div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
   document.getElementById('modal').style.display = 'flex';
+  await applyEmailTemplate(companyId, 'cadiah');
 }
 
 async function generateEmailDraft(companyId) {
@@ -3077,7 +3044,7 @@ async function applyEmailTemplate(companyId, templateId) {
     const [aiRes, contactRes] = await Promise.all([
       fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
         system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible-sounding online presence issues for a prospecting email.`,
-        messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with:\n- "keyword": the most relevant local search keyword for this business (e.g. "plumber", "roofing contractor", "HVAC repair") — just the service type, no location\n- "finding1": completes the sentence "One thing I noticed was ___" — conversational, lowercase start, 1-2 sentences (e.g. "your Google Business Profile looks like it hasn't been claimed yet — no reviews, missing hours, and the address info seems incomplete.")\n- "finding2": completes the sentence "I also came across ___" — a different issue, same tone (e.g. "that your website doesn't have any location-specific pages, which likely makes it hard for you to show up when people in your area search for what you offer.")` }],
+        messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with these exact fields:\n- "keyword": the most relevant local search service type for this business (e.g. "plumber", "roofing contractor", "HVAC repair") — single phrase, no location, no brackets\n- "finding1": completes the sentence "One thing I noticed was ___" — must be a specific, complete observation with no placeholder text or brackets whatsoever. Use the actual company name and location. Conversational, lowercase start. Example: "your Google Business Profile looks like it hasn't been claimed yet — no reviews, missing hours, and the address info seems incomplete."\n- "finding2": completes "I also came across ___" — a different specific issue, no placeholder text or brackets. Example: "that your website doesn't have any location-specific pages for the cities you serve, which likely limits how often you show up in local searches."` }],
         max_tokens: 400,
       })}),
       fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})),
@@ -3104,15 +3071,17 @@ async function applyEmailTemplate(companyId, templateId) {
     } catch {}
     const serpQuery = [keyword, c.city, c.state].filter(Boolean).join(' ');
 
+    const senderName = state.user?.name || '[Your Name]';
     const subject = template.subject.replace('[Company Name]', c.name);
     const body = template.body
+      .replace(/\[SENDER_NAME\]/g, senderName)
       .replace('[First Name]', firstName || '[First Name]')
       .replace('[Company Name]', c.name)
       .replace('[FINDING_1]', finding1)
       .replace('[FINDING_2]', finding2);
 
-    const websiteThumb = website ? `https://image.thum.io/get/width/600/${encodeURIComponent(website)}` : '';
-    const serpThumb = serpQuery ? `https://image.thum.io/get/width/600/${encodeURIComponent('https://www.google.com/search?q=' + encodeURIComponent(serpQuery))}` : '';
+    const websiteThumb = website ? `https://image.thum.io/get/width/600/${website}` : '';
+    const serpThumb = serpQuery ? `https://image.thum.io/get/width/600/https://www.google.com/search?q=${encodeURIComponent(serpQuery)}` : '';
     state._emailImages = [
       ...(websiteThumb ? [{ url: websiteThumb, label: `Website: ${website}` }] : []),
       ...(serpThumb ? [{ url: serpThumb, label: `Search results: "${serpQuery}"` }] : []),
@@ -3173,7 +3142,7 @@ const EMAIL_TEMPLATES = [
     id: 'cadiah',
     name: 'Cadiah Email',
     subject: 'Quick thought on [Company Name]',
-    body: `Hi [First Name],\n\nHope you're doing well.\n\nMy name is Cadiah Gilliland and I work with Olly Olly. I recently connected with [Employee Name] on your team and wanted to reach out personally.\n\nWhile doing some research on your online presence, I noticed a few things that caught my attention and thought it made sense to introduce myself rather than make assumptions about what may or may not already be in the works.\n\nOne thing I noticed was [FINDING_1]\n\nI also came across [FINDING_2]\n\nI could be completely off base, which is why I'd love to get your perspective. If nothing else, I can share what I found and you can tell me whether it's already being addressed or worth a deeper conversation.\n\nDo you have 15-20 minutes sometime this week or next?\n\nLooking forward to connecting.\n\nBest,\nCadiah Gilliland\nNational Account Executive\nOlly Olly\n\nP.S. If there is someone else on the team who oversees your marketing efforts, feel free to point me in the right direction.`,
+    body: `Hi [First Name],\n\nHope you're doing well.\n\nMy name is [SENDER_NAME] and I work with Olly Olly. I recently connected with [Employee Name] on your team and wanted to reach out personally.\n\nWhile doing some research on your online presence, I noticed a few things that caught my attention and thought it made sense to introduce myself rather than make assumptions about what may or may not already be in the works.\n\nOne thing I noticed was [FINDING_1]\n\nI also came across [FINDING_2]\n\nI could be completely off base, which is why I'd love to get your perspective. If nothing else, I can share what I found and you can tell me whether it's already being addressed or worth a deeper conversation.\n\nDo you have 15-20 minutes sometime this week or next?\n\nLooking forward to connecting.\n\nBest,\n[SENDER_NAME]\nNational Account Executive\nOlly Olly\n\nP.S. If there is someone else on the team who oversees your marketing efforts, feel free to point me in the right direction.`,
   },
 ];
 
