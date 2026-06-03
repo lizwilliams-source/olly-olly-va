@@ -573,7 +573,14 @@ function buildScheduleHTML(allTasks, calEvents, viewDate) {
     const dur = d && endD ? Math.round((endD - d) / 60000) : null;
     const durStr = dur ? (dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ' ' + dur%60 + 'm' : ''}` : `${dur}m`) : '';
     const hsMatch = ev.description?.match(/https:\/\/app\.hubspot\.com\/contacts\/\d+\/company\/\d+/);
-    const hsUrl = hsMatch?.[0] || null;
+    let hsUrl = hsMatch?.[0] || null;
+    if (!hsUrl) {
+      const titleMatch = ev.summary?.match(/Follow-up call — (.+)/i) || ev.summary?.match(/— (.+)$/);
+      if (titleMatch) {
+        const company = state.contacts.find(c => c.name?.toLowerCase() === titleMatch[1].trim().toLowerCase());
+        if (company) hsUrl = `https://app.hubspot.com/contacts/45530742/company/${company.id}`;
+      }
+    }
     const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').replace(/HubSpot:.*$/m, '').trim().slice(0, 120) : null;
     const tagKey = demoTagKey(ev);
     const isDemo = isTaggedDemo(ev);
