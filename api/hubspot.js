@@ -68,6 +68,43 @@ export default async function handler(req, res) {
     }
   }
 
+  // ── RESOLVE HUBSPOT RECORDING URL (follows auth redirect server-side) ──────
+  if (req.method === 'GET' && req.query.action === 'recording-url') {
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      const KV_URL = process.env.KV_REST_API_URL;
+      const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+      const sessionRes = await fetch(`${KV_URL}/get/${encodeURIComponent(`session:${token}`)}`, { headers: { Authorization: `Bearer ${KV_TOKEN}` } });
+      const sessionData = await sessionRes.json();
+      if (!sessionData.result) return res.status(401).json({ error: 'Unauthorized' });
+
+      const recordingUrl = req.query.url ? decodeURIComponent(req.query.url) : null;
+      if (!recordingUrl) return res.status(400).json({ error: 'Missing url' });
+
+      const accessToken = await getHsToken(KV_URL, KV_TOKEN);
+      const r = await fetch(recordingUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        redirect: 'manual',
+      });
+
+      const location = r.headers.get('location');
+      if (location) return res.status(200).json({ url: location });
+
+      // Some HubSpot portals return the audio directly (no redirect)
+      if (r.ok) {
+        const audioBuffer = await r.arrayBuffer();
+        const contentType = r.headers.get('content-type') || 'audio/mpeg';
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.status(200).send(Buffer.from(audioBuffer));
+      }
+
+      return res.status(502).json({ error: 'Unexpected response from HubSpot recording endpoint' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   // ── ALL COMPANY PROPERTY DEFINITIONS ──────────────────────────────────────
   if (req.method === 'GET' && req.query.action === 'properties') {
     try {

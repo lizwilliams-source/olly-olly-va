@@ -2260,9 +2260,16 @@ async function useHubSpotRecording(companyId, encodedUrl) {
 
   state.transcribing = true;
   try {
-    // Download the recording from HubSpot
-    const audioRes = await fetch(recordingUrl);
-    if (!audioRes.ok) throw new Error('Failed to download recording from HubSpot');
+    // Resolve the auth-gated HubSpot recording URL server-side, then fetch audio
+    const resolveRes = await fetch(`/api/hubspot?action=recording-url&url=${encodeURIComponent(recordingUrl)}`, {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    const resolveData = await resolveRes.json();
+    if (!resolveData.url && !resolveRes.headers.get('content-type')?.startsWith('audio')) {
+      throw new Error(resolveData.error || 'Failed to resolve recording URL');
+    }
+    const audioRes = resolveData.url ? await fetch(resolveData.url) : resolveRes;
+    if (!audioRes.ok) throw new Error('Failed to download recording');
     const audioBlob = await audioRes.blob();
 
     document.getElementById('transcribe-status').textContent = 'Uploading to transcription server...';
