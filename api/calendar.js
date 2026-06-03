@@ -139,7 +139,9 @@ export default async function handler(req, res) {
       description: e.description || null,
       location: e.location || null,
       htmlLink: e.htmlLink || null,
+      id: e.id || null,
       attendees: (e.attendees || []).filter(a => !a.self).map(a => a.displayName || a.email).slice(0, 5),
+      attendeeEmails: (e.attendees || []).filter(a => !a.self && a.email).map(a => a.email).slice(0, 5),
       calendarId: e._calendarId || null,
       calendarName: e._calendarId ? (calendarNames[e._calendarId] || e._calendarId) : null,
     }));

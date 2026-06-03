@@ -19,6 +19,7 @@ const state = {
   demoTags: {},
   demoAcks: {},
   calendarDateOffset: 0,
+  eventHsCache: {},
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
@@ -409,6 +410,7 @@ async function navigateCalendarDay(n) {
     const data = await calRes.json();
     state._cachedCalEvents = data.events || [];
     if (isToday) { state.calendarEvents = data.events || []; renderDemoBanner(); }
+    resolveEventCompanies(data.events || []);
   } catch {}
   renderScheduleSection();
 }
@@ -573,14 +575,7 @@ function buildScheduleHTML(allTasks, calEvents, viewDate) {
     const dur = d && endD ? Math.round((endD - d) / 60000) : null;
     const durStr = dur ? (dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ' ' + dur%60 + 'm' : ''}` : `${dur}m`) : '';
     const hsMatch = ev.description?.match(/https:\/\/app\.hubspot\.com\/contacts\/\d+\/company\/\d+/);
-    let hsUrl = hsMatch?.[0] || null;
-    if (!hsUrl) {
-      const titleMatch = ev.summary?.match(/Follow-up call — (.+)/i) || ev.summary?.match(/— (.+)$/);
-      if (titleMatch) {
-        const company = state.contacts.find(c => c.name?.toLowerCase() === titleMatch[1].trim().toLowerCase());
-        if (company) hsUrl = `https://app.hubspot.com/contacts/45530742/company/${company.id}`;
-      }
-    }
+    const hsUrl = hsMatch?.[0] || (ev.id ? state.eventHsCache[ev.id] : null) || null;
     const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').replace(/HubSpot:.*$/m, '').trim().slice(0, 120) : null;
     const tagKey = demoTagKey(ev);
     const isDemo = isTaggedDemo(ev);
@@ -2553,7 +2548,7 @@ async function loadCalendarEvents() {
     const params = new URLSearchParams({ action: 'events', timeMin: s.toISOString(), timeMax: e.toISOString() });
     const res = await fetch(`/api/calendar?${params}`, { headers: { Authorization: `Bearer ${state.token}` } });
     const data = await res.json();
-    if (data.events) state.calendarEvents = data.events;
+    if (data.events) { state.calendarEvents = data.events; resolveEventCompanies(data.events); }
     if (data.calendars) state._availableCalendars = data.calendars;
   } catch {}
   renderDemoBanner();
@@ -2566,6 +2561,30 @@ async function loadDemoTags() {
     const { tags, acks } = await res.json();
     state.demoTags = tags || {};
     state.demoAcks = acks || {};
+  } catch {}
+}
+
+async function resolveEventCompanies(events) {
+  const unresolved = (events || []).filter(ev => {
+    if (!ev.id) return false;
+    if (state.eventHsCache[ev.id]) return false;
+    if (ev.description?.match(/https:\/\/app\.hubspot\.com\/contacts\/\d+\/company\/\d+/)) return false;
+    return ev.attendeeEmails?.length > 0;
+  });
+  if (!unresolved.length) return;
+  const emails = [...new Set(unresolved.flatMap(ev => ev.attendeeEmails || []))];
+  try {
+    const res = await fetch('/api/hubspot?action=companiesByEmail', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ emails }),
+    });
+    const { map } = await res.json();
+    for (const ev of unresolved) {
+      const match = (ev.attendeeEmails || []).find(e => map[e]);
+      if (match) state.eventHsCache[ev.id] = map[match];
+    }
+    renderScheduleSection();
   } catch {}
 }
 

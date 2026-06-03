@@ -68,6 +68,47 @@ export default async function handler(req, res) {
     }
   }
 
+  // ── FIND COMPANIES BY ATTENDEE EMAILS ────────────────────────────────────────
+  if (req.method === 'POST' && req.query.action === 'companiesByEmail') {
+    try {
+      const KV_URL = process.env.KV_REST_API_URL;
+      const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+      const accessToken = await getHsToken(KV_URL, KV_TOKEN);
+      const { emails } = req.body; // array of email strings
+      if (!emails?.length) return res.status(200).json({ map: {} });
+
+      // Search contacts by email (batch: one filter group per email)
+      const filterGroups = emails.map(e => ({ filters: [{ propertyName: 'email', operator: 'EQ', value: e }] }));
+      const searchRes = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filterGroups, properties: ['email'], limit: emails.length }),
+      }).then(r => r.json());
+
+      const contactIds = (searchRes.results || []).map(c => c.id);
+      if (!contactIds.length) return res.status(200).json({ map: {} });
+
+      // Get company associations for all contacts
+      const assocRes = await fetch('https://api.hubapi.com/crm/v3/associations/contacts/companies/batch/read', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inputs: contactIds.map(id => ({ id })) }),
+      }).then(r => r.json());
+
+      // Build email → company URL map
+      const emailMap = Object.fromEntries((searchRes.results || []).map(c => [c.id, c.properties.email]));
+      const map = {};
+      for (const result of (assocRes.results || [])) {
+        const companyId = result.to?.[0]?.id;
+        const email = emailMap[result.from?.id];
+        if (email && companyId) map[email] = `https://app.hubspot.com/contacts/45530742/company/${companyId}`;
+      }
+      return res.status(200).json({ map });
+    } catch (err) {
+      return res.status(200).json({ map: {} });
+    }
+  }
+
   // ── RESOLVE HUBSPOT RECORDING URL (follows auth redirect server-side) ──────
   if (req.method === 'GET' && req.query.action === 'recording-url') {
     try {
