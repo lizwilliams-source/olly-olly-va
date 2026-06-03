@@ -3056,22 +3056,24 @@ async function applyEmailTemplate(companyId, templateId) {
       scrape.description ? `Website description: ${scrape.description}` : '',
     ].filter(Boolean).join('\n');
 
-    // Step 2: call AI with real data
-    const aiRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-      system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible findings based on the actual data provided — no placeholders, no brackets, no made-up facts.`,
-      messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\n${website ? 'Website: ' + website : 'No website on file'}\n${notes ? 'Notes:\n' + notes + '\n' : ''}\nResearch data:\n${researchCtx || 'No data available — infer from company name and location only'}\n\nReturn ONLY a JSON object:\n- "keyword": exact service type for local search — derive from GBP category or schema type above (e.g. "plumber", "roofing contractor", "HVAC repair")\n- "finding1": completes "One thing I noticed was ___" — RULES: always use "you/your/you guys", never say "the business" or "the company". Sound like a real person who just Googled them, not AI. Casual and specific. Use actual numbers from the research data. Example: "your Google profile only has 3 reviews and it looks like you haven't responded to any of them — most of your competitors in the area have way more."\n- "finding2": completes "I also came across ___" — same rules. Different issue. Reference the website data if available. Example: "that your website doesn't really have pages set up for the different areas you guys serve, which probably makes it tough to show up when someone nearby is searching."` }],
-      max_tokens: 450,
-    })});
+    // Compute effective website before AI call so prompt is accurate
+    const effectiveWebsite = website || scrape.gbpWebsite || '';
 
-    // Extract first name from first associated contact
-    let firstName = '';
+    // Step 2: contact details + AI in parallel (scrape already done)
     const contactIds = (contactRes.results || []).map(a => a.id);
-    if (contactIds.length) {
-      try {
-        const cd = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${contactIds[0]}?properties=firstname,lastname`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        firstName = cd.properties?.firstname || '';
-      } catch {}
-    }
+    const [aiRes, contactDetail] = await Promise.all([
+      fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+        system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible findings based on the actual data provided — no placeholders, no brackets, no made-up facts.`,
+        messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\n${effectiveWebsite ? 'Website: ' + effectiveWebsite : 'No website found'}\n${notes ? 'Notes:\n' + notes + '\n' : ''}\nResearch data:\n${researchCtx || 'No data available — infer from company name and location only'}\n\nReturn ONLY a JSON object:\n- "keyword": exact service type for local search — derive from GBP category or schema type above (e.g. "plumber", "roofing contractor", "HVAC repair")\n- "finding1": completes "One thing I noticed was ___" — RULES: always use "you/your/you guys", never say "the business" or "the company". Sound like a real person who just Googled them, not AI. Casual and specific. Use actual numbers from the research data. Example: "your Google profile only has 3 reviews and it looks like you haven't responded to any of them — most of your competitors in the area have way more."\n- "finding2": completes "I also came across ___" — same rules. Different issue. Reference the website data if available. Example: "that your website doesn't really have pages set up for the different areas you guys serve, which probably makes it tough to show up when someone nearby is searching."` }],
+        max_tokens: 450,
+      })}),
+      contactIds.length
+        ? fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${contactIds[0]}?properties=firstname,lastname,email`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({}))
+        : Promise.resolve({}),
+    ]);
+
+    const firstName = contactDetail?.properties?.firstname || '';
+    const contactEmail = contactDetail?.properties?.email || '';
 
     const data = await aiRes.json();
     const text = data.content?.[0]?.text || '';
@@ -3082,11 +3084,8 @@ async function applyEmailTemplate(companyId, templateId) {
       finding2 = parsed.finding2 || finding2;
       keyword = parsed.keyword || '';
     } catch {}
-    // Prefer GBP category or schema type over AI guess for keyword
     const bestKeyword = scrape.gbpCategory || scrape.schemaType || keyword;
     const serpQuery = [bestKeyword, c.city, c.state].filter(Boolean).join(' ');
-    // Use GBP website as fallback if HubSpot has none
-    const effectiveWebsite = website || scrape.gbpWebsite || '';
 
     const senderName = state.user?.name || '[Your Name]';
     const subject = template.subject.replace('[Company Name]', c.name);
@@ -3098,7 +3097,7 @@ async function applyEmailTemplate(companyId, templateId) {
       .replace('[FINDING_2]', finding2);
 
     const websiteThumb = effectiveWebsite ? `https://image.thum.io/get/width/600/${effectiveWebsite}` : '';
-    const serpThumb = serpQuery ? `https://image.thum.io/get/width/600/https://www.google.com/search?q=${encodeURIComponent(serpQuery)}` : '';
+    const serpThumb = serpQuery ? `https://image.thum.io/get/width/600/https://www.bing.com/search?q=${encodeURIComponent(serpQuery)}` : '';
     state._emailImages = [
       ...(websiteThumb ? [{ url: websiteThumb, label: `Website: ${effectiveWebsite}` }] : []),
       ...(serpThumb ? [{ url: serpThumb, label: `Search results: "${serpQuery}"` }] : []),
@@ -3120,7 +3119,7 @@ async function applyEmailTemplate(companyId, templateId) {
       </div>` : '';
 
     document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
-      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" placeholder="recipient@example.com" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" value="${contactEmail}" placeholder="recipient@example.com" style="${ta}" /></div>
       <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
       <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:300px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
       ${screenshotsHtml}
