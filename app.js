@@ -2017,7 +2017,7 @@ async function createCalendarEvent(companyId) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
       body: JSON.stringify({
         title: `Follow-up call — ${c.name}`,
-        description: notes,
+        description: [notes, `HubSpot: https://app.hubspot.com/contacts/45530742/company/${companyId}`].filter(Boolean).join('\n\n'),
         startTime,
         endTime,
       }),
