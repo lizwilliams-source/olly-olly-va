@@ -152,9 +152,14 @@ export default async function handler(req, res) {
   if (action === 'send-email') {
     const { accessToken, error, needsConnect } = await getGTokens(sessionToken);
     if (error) return res.status(401).json({ error, needsConnect });
-    const { to, subject, body } = req.body;
+    const { to, subject, body, images } = req.body;
     if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, and body required' });
-    const message = [`To: ${to}`, `Subject: ${subject}`, `MIME-Version: 1.0`, `Content-Type: text/plain; charset=utf-8`, ``, body].join('\r\n');
+    const htmlBody = body.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    const imagesHtml = (images || []).map(img =>
+      `<br><p style="font-size:12px;color:#666;margin:12px 0 4px">${img.label}</p><img src="${img.url}" style="max-width:100%;border:1px solid #ddd;border-radius:4px;display:block">`
+    ).join('');
+    const fullHtml = `<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;max-width:600px">${htmlBody}${imagesHtml}</body></html>`;
+    const message = [`To: ${to}`, `Subject: ${subject}`, `MIME-Version: 1.0`, `Content-Type: text/html; charset=utf-8`, ``, fullHtml].join('\r\n');
     const raw = Buffer.from(message).toString('base64url');
     const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',

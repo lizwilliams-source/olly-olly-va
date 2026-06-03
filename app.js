@@ -3047,7 +3047,7 @@ async function sendEmail(companyId) {
   const btn = document.querySelector('#modal-footer .btn-primary');
   if (btn) { btn.textContent = 'Sending...'; btn.disabled = true; }
   try {
-    const res = await fetch('/api/calendar?action=send-email', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ to, subject, body }) });
+    const res = await fetch('/api/calendar?action=send-email', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ to, subject, body, images: state._emailImages || [] }) });
     const data = await res.json();
     if (data.needsConnect) { if (confirm('Gmail permission needed. Reconnect Google?')) connectGoogleCalendar(); if (btn) { btn.textContent = 'Send via Gmail'; btn.disabled = false; } return; }
     if (!res.ok) throw new Error(data.error || 'Send failed');
@@ -3112,6 +3112,10 @@ async function applyEmailTemplate(companyId, templateId) {
 
     const websiteThumb = website ? `https://image.thum.io/get/width/600/${encodeURIComponent(website)}` : '';
     const serpThumb = serpQuery ? `https://image.thum.io/get/width/600/${encodeURIComponent('https://www.google.com/search?q=' + encodeURIComponent(serpQuery))}` : '';
+    state._emailImages = [
+      ...(websiteThumb ? [{ url: websiteThumb, label: `Website: ${website}` }] : []),
+      ...(serpThumb ? [{ url: serpThumb, label: `Search results: "${serpQuery}"` }] : []),
+    ];
 
     const screenshotsHtml = (websiteThumb || serpThumb) ? `
       <div>
