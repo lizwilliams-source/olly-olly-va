@@ -523,10 +523,15 @@ function buildScheduleHTML(allTasks, calEvents) {
     const dur = endD ? Math.round((endD - d) / 60000) : null;
     const durStr = dur ? (dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ' ' + dur%60 + 'm' : ''}` : `${dur}m`) : '';
     const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').trim().slice(0, 120) : null;
-    return `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius)">
+    const tagKey = demoTagKey(ev);
+    const isDemo = isTaggedDemo(ev);
+    return `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isDemo ? '#f59e0b' : 'var(--blue)'};border-radius:var(--radius)">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-        <div style="font-size:13px;font-weight:600;color:var(--text)">📅 ${ev.summary || 'Event'}</div>
-        ${ev.htmlLink ? `<a href="${ev.htmlLink}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;white-space:nowrap;flex-shrink:0">Cal ↗</a>` : ''}
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${isDemo ? '🎯' : '📅'} ${ev.summary || 'Event'}</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+          ${ev.htmlLink ? `<a href="${ev.htmlLink}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;white-space:nowrap">Cal ↗</a>` : ''}
+          <button onclick="toggleDemoTag('${tagKey}')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${isDemo ? 'rgba(245,158,11,.4)' : 'var(--border2)'};background:${isDemo ? 'rgba(245,158,11,.15)' : 'transparent'};color:${isDemo ? '#f59e0b' : 'var(--text3)'};cursor:pointer;white-space:nowrap">${isDemo ? '🎯 Demo' : 'Mark Demo'}</button>
+        </div>
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px">${timeStr}${durStr ? ' · ' + durStr : ''}</div>
       ${ev.location ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">📍 ${ev.location}</div>` : ''}
@@ -2482,12 +2487,21 @@ async function loadCalendarPrefs() {
 
 // ─── DEMO BLOCKER ─────────────────────────────────────────────────────────────
 function demoAckKey(ev) { return `demo_ack_${ev.summary || ''}_${ev.start?.dateTime || ''}`; }
+function demoTagKey(ev) { return `demo_tag_${ev.id || (ev.summary || '') + '_' + (ev.start?.dateTime || '')}`; }
+function isTaggedDemo(ev) { return !!localStorage.getItem(demoTagKey(ev)); }
+function toggleDemoTag(key) {
+  if (localStorage.getItem(key)) localStorage.removeItem(key);
+  else localStorage.setItem(key, '1');
+  if (state.currentView === 'today') showView('today');
+  renderDemoBanner();
+}
 
 function checkUpcomingDemo() {
   if (!state.calendarEvents?.length) return null;
   const now = Date.now(), in10 = now + 10 * 60 * 1000;
   return state.calendarEvents.find(ev => {
     if (!ev.start?.dateTime) return false;
+    if (!isTaggedDemo(ev)) return false;
     const s = new Date(ev.start.dateTime).getTime();
     return s > now && s <= in10 && !localStorage.getItem(demoAckKey(ev));
   }) || null;
