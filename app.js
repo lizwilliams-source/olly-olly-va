@@ -3076,8 +3076,8 @@ async function applyEmailTemplate(companyId, templateId) {
     const [aiRes, contactRes] = await Promise.all([
       fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
         system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible-sounding online presence issues for a prospecting email.`,
-        messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with:\n- "finding1": completes the sentence "One thing I noticed was ___" — conversational, lowercase start, 1-2 sentences (e.g. "your Google Business Profile looks like it hasn't been claimed yet — no reviews, missing hours, and the address info seems incomplete.")\n- "finding2": completes the sentence "I also came across ___" — a different issue, same tone (e.g. "that your website doesn't have any location-specific pages, which likely makes it hard for you to show up when people in your area search for what you offer.")` }],
-        max_tokens: 350,
+        messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with:\n- "keyword": the most relevant local search keyword for this business (e.g. "plumber", "roofing contractor", "HVAC repair") — just the service type, no location\n- "finding1": completes the sentence "One thing I noticed was ___" — conversational, lowercase start, 1-2 sentences (e.g. "your Google Business Profile looks like it hasn't been claimed yet — no reviews, missing hours, and the address info seems incomplete.")\n- "finding2": completes the sentence "I also came across ___" — a different issue, same tone (e.g. "that your website doesn't have any location-specific pages, which likely makes it hard for you to show up when people in your area search for what you offer.")` }],
+        max_tokens: 400,
       })},
       fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})),
     ]);
@@ -3094,12 +3094,14 @@ async function applyEmailTemplate(companyId, templateId) {
 
     const data = await aiRes.json();
     const text = data.content?.[0]?.text || '';
-    let finding1 = '[INSERT FINDING #1]', finding2 = '[INSERT FINDING #2]';
+    let finding1 = '[INSERT FINDING #1]', finding2 = '[INSERT FINDING #2]', keyword = '';
     try {
       const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
       finding1 = parsed.finding1 || finding1;
       finding2 = parsed.finding2 || finding2;
+      keyword = parsed.keyword || '';
     } catch {}
+    const serpQuery = [keyword, c.city, c.state].filter(Boolean).join(' ');
 
     const subject = template.subject.replace('[Company Name]', c.name);
     const body = template.body
