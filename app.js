@@ -2264,13 +2264,22 @@ async function useHubSpotRecording(companyId, encodedUrl) {
     const resolveRes = await fetch(`/api/hubspot?action=recording-url&url=${encodeURIComponent(recordingUrl)}`, {
       headers: { Authorization: `Bearer ${state.token}` },
     });
-    const resolveData = await resolveRes.json();
-    if (!resolveData.url && !resolveRes.headers.get('content-type')?.startsWith('audio')) {
-      throw new Error(resolveData.error || 'Failed to resolve recording URL');
+    if (!resolveRes.ok) {
+      const err = await resolveRes.json().catch(() => ({}));
+      throw new Error(err.error || `Recording resolve failed (${resolveRes.status})`);
     }
-    const audioRes = resolveData.url ? await fetch(resolveData.url) : resolveRes;
-    if (!audioRes.ok) throw new Error('Failed to download recording');
-    const audioBlob = await audioRes.blob();
+    const contentType = resolveRes.headers.get('content-type') || '';
+    let audioBlob;
+    if (contentType.startsWith('audio') || contentType.startsWith('video')) {
+      // Backend streamed the audio directly
+      audioBlob = await resolveRes.blob();
+    } else {
+      const { url, error } = await resolveRes.json();
+      if (!url) throw new Error(error || 'Failed to resolve recording URL');
+      const audioRes = await fetch(url);
+      if (!audioRes.ok) throw new Error('Failed to download recording from CDN');
+      audioBlob = await audioRes.blob();
+    }
 
     document.getElementById('transcribe-status').textContent = 'Uploading to transcription server...';
     document.getElementById('transcribe-bar').style.width = '30%';

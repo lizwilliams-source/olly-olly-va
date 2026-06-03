@@ -82,24 +82,26 @@ export default async function handler(req, res) {
       if (!recordingUrl) return res.status(400).json({ error: 'Missing url' });
 
       const accessToken = await getHsToken(KV_URL, KV_TOKEN);
+      // Use redirect:'follow' so Node follows the 302; r.url is the final CDN/S3 URL
       const r = await fetch(recordingUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
-        redirect: 'manual',
+        redirect: 'follow',
       });
 
-      const location = r.headers.get('location');
-      if (location) return res.status(200).json({ url: location });
+      if (!r.ok) return res.status(502).json({ error: `HubSpot recording returned ${r.status}` });
 
-      // Some HubSpot portals return the audio directly (no redirect)
-      if (r.ok) {
-        const audioBuffer = await r.arrayBuffer();
-        const contentType = r.headers.get('content-type') || 'audio/mpeg';
-        res.setHeader('Content-Type', contentType);
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        return res.status(200).send(Buffer.from(audioBuffer));
+      // If the URL changed, a redirect was followed — return the final URL to the browser
+      if (r.url && r.url !== recordingUrl) {
+        await r.body?.cancel();
+        return res.status(200).json({ url: r.url });
       }
 
-      return res.status(502).json({ error: 'Unexpected response from HubSpot recording endpoint' });
+      // No redirect — HubSpot returned the audio directly; stream it through
+      const audioBuffer = await r.arrayBuffer();
+      const contentType = r.headers.get('content-type') || 'audio/mpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.status(200).send(Buffer.from(audioBuffer));
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
