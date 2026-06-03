@@ -2971,9 +2971,14 @@ async function openEmailCompose(companyId, useCallContext = false) {
       }).join('')
     : `<div style="font-size:12px;color:var(--text3);padding:8px 0">No saved notes yet. Email will use company info only.</div>`;
 
+  const templatesHtml = EMAIL_TEMPLATES.map(t =>
+    `<button class="btn btn-sm" style="font-size:12px" onclick="applyEmailTemplate('${companyId}','${t.id}')">${t.name} ↗</button>`
+  ).join('');
+
   document.getElementById('modal-title').innerHTML = `✉️ Email — ${c.name}`;
   document.getElementById('modal-body').innerHTML = `
     <div style="display:flex;flex-direction:column;gap:14px">
+      ${EMAIL_TEMPLATES.length ? `<div><div class="field-label" style="margin-bottom:8px">Templates</div><div style="display:flex;gap:8px;flex-wrap:wrap">${templatesHtml}</div></div><div style="border-top:1px solid var(--border);padding-top:14px"><div class="field-label" style="margin-bottom:8px">Or generate with AI</div></div>` : ''}
       <div><div class="field-label" style="margin-bottom:8px">Select notes to include</div><div style="display:flex;flex-direction:column;gap:6px">${notesHtml}</div></div>
       <div><div class="field-label" style="margin-bottom:4px">Tone</div>
         <select id="email-tone" style="${ta}">
@@ -3054,6 +3059,56 @@ async function sendEmail(companyId) {
   } catch (e) { toast('Failed: ' + e.message, 'error'); if (btn) { btn.textContent = 'Send via Gmail'; btn.disabled = false; } }
 }
 
+async function applyEmailTemplate(companyId, templateId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  const template = EMAIL_TEMPLATES.find(t => t.id === templateId);
+  if (!c || !template) return;
+
+  const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Generating findings with AI...</div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
+
+  const notes = (state.notes?.[companyId] || []).slice(0, 5).map(n => n.text).join('\n---\n');
+  const website = c.rawProps?.website || c.rawProps?.domain || '';
+
+  try {
+    const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+      system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible-sounding online presence issues for a prospecting email.`,
+      messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with:\n- "firstName": decision maker's first name from notes if found, otherwise ""\n- "finding1": one specific online presence issue (1-2 sentences, e.g. incomplete GBP, missing location pages, weak review profile)\n- "finding2": a second different online presence issue (1-2 sentences)` }],
+      max_tokens: 400,
+    })});
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '';
+    let firstName = '', finding1 = '[INSERT FINDING #1]', finding2 = '[INSERT FINDING #2]';
+    try {
+      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+      firstName = parsed.firstName || '';
+      finding1 = parsed.finding1 || finding1;
+      finding2 = parsed.finding2 || finding2;
+    } catch {}
+
+    const subject = template.subject.replace('[Company Name]', c.name);
+    const body = template.body
+      .replace('[First Name]', firstName || '[First Name]')
+      .replace('[Company Name]', c.name)
+      .replace('[FINDING_1]', finding1)
+      .replace('[FINDING_2]', finding2);
+
+    document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" placeholder="recipient@example.com" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:300px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+    </div>`;
+    document.getElementById('modal-footer').innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
+      <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
+      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send via Gmail</button>`;
+  } catch (e) {
+    document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
+    document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
+  }
+}
+
 function copyEmailDraft() {
   const s = document.getElementById('email-subject')?.value || '';
   const b = document.getElementById('email-body')?.value || '';
@@ -3064,6 +3119,15 @@ function copyEmailDraft() {
 state.contactsSort = state.contactsSort || { field: 'score', dir: 'desc' };
 state.userColumns = null;
 state.allHubSpotProps = null;
+
+const EMAIL_TEMPLATES = [
+  {
+    id: 'cadiah',
+    name: 'Cadiah Email',
+    subject: 'Quick thought on [Company Name]',
+    body: `Hi [First Name],\n\nHope you're doing well.\n\nMy name is Cadiah Gilliland and I work with Olly Olly. I recently connected with [Employee Name] on your team and wanted to reach out personally.\n\nWhile doing some research on your online presence, I noticed a few things that caught my attention and thought it made sense to introduce myself rather than make assumptions about what may or may not already be in the works.\n\nOne thing I noticed was:\n[FINDING_1]\n\nI also came across:\n[FINDING_2]\n\n[INSERT SCREENSHOT HERE]\n[INSERT SCREENSHOT HERE]\n\nI could be completely off base, which is why I'd love to get your perspective. If nothing else, I can share what I found and you can tell me whether it's already being addressed or worth a deeper conversation.\n\nDo you have 15-20 minutes sometime this week or next?\n\nLooking forward to connecting.\n\nBest,\nCadiah Gilliland\nNational Account Executive\nOlly Olly\n\nP.S. If there is someone else on the team who oversees your marketing efforts, feel free to point me in the right direction.`,
+  },
+];
 
 const DEFAULT_COLUMNS = [
   { name: 'name', label: 'Company' },
