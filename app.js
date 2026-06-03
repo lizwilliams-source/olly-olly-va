@@ -669,7 +669,7 @@ function renderContacts() {
     <div class="topbar">
       <div class="topbar-left"><h2>🏢 My Companies</h2><p>${filtered.length} of ${state.contacts.length}</p></div>
       <div class="topbar-right" style="gap:6px">
-        <input id="contact-search" value="${state.contactsSearch || ''}" placeholder="Search..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:160px" oninput="state.contactsSearch=this.value;state.contactsPage=0;clearTimeout(window._searchTimer);window._searchTimer=setTimeout(renderContacts,250)" />
+        <input id="contact-search" value="${state.contactsSearch || ''}" placeholder="Search..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:160px" oninput="state.contactsSearch=this.value;state.contactsPage=0;window._restoreSearchFocus=true;clearTimeout(window._searchTimer);window._searchTimer=setTimeout(renderContacts,250)" />
         <button class="btn btn-sm" onclick="openColumnPicker()" style="font-size:12px">⚙️ Columns</button>
         ${[25, 50, 100].map(n => `<button class="btn btn-sm ${pageSize === n ? 'btn-primary' : ''}" onclick="state.contactsPageSize=${n};state.contactsPage=0;renderContacts()">${n}</button>`).join('')}
       </div>
@@ -682,6 +682,11 @@ function renderContacts() {
       <div id="contact-list" style="min-width:600px">${rows}</div>
       ${pagination}
     </div>`;
+  if (window._restoreSearchFocus) {
+    window._restoreSearchFocus = false;
+    const si = document.getElementById('contact-search');
+    if (si) { si.focus(); const len = si.value.length; si.setSelectionRange(len, len); }
+  }
 }
 
 function leadCardHTML(c) {
