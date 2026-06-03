@@ -1588,13 +1588,31 @@ async function showHubSpotCallPicker(companyId) {
   content.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px;justify-content:center"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Fetching calls from HubSpot...</div>`;
 
   try {
-    const res = await fetch('/api/hubspot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': `/crm/v3/objects/calls/search`, 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'associations.company', operator: 'EQ', value: companyId }] }], properties: ['hs_call_recording_url','hs_timestamp','hs_call_duration','hs_call_status','hs_call_disposition','hs_call_direction','hs_call_body'], sorts: [{ propertyName: 'hs_timestamp', direction: 'DESCENDING' }], limit: 25 }),
+    // Step 1: get call IDs directly associated with this company
+    const assocRes = await fetch('/api/hubspot', {
+      headers: { 'X-HubSpot-Path': `/crm/v4/objects/companies/${companyId}/associations/calls`, Authorization: `Bearer ${state.token}` },
     });
-    const data = await res.json();
-    const calls = (data.results || []).filter(c => c.properties.hs_call_recording_url);
+    const assocData = await assocRes.json();
+    const callIds = (assocData.results || []).map(a => String(a.toObjectId));
+
+    if (!callIds.length) {
+      content.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text2)">
+        <div style="font-size:13px;margin-bottom:12px">No recorded calls found in HubSpot for this company.</div>
+        <button class="btn btn-primary" onclick="showUploadInterface('${companyId}')">📁 Upload recording instead</button>
+      </div>`;
+      return;
+    }
+
+    // Step 2: batch-read properties for those calls (cap at 25)
+    const batchRes = await fetch('/api/hubspot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ inputs: callIds.slice(0, 25).map(id => ({ id })), properties: ['hs_call_recording_url','hs_timestamp','hs_call_duration','hs_call_status','hs_call_disposition','hs_call_direction','hs_call_body'] }),
+    });
+    const batchData = await batchRes.json();
+    const calls = (batchData.results || [])
+      .filter(c => c.properties.hs_call_recording_url)
+      .sort((a, b) => new Date(b.properties.hs_timestamp) - new Date(a.properties.hs_timestamp));
 
     const DISPOSITION_ICONS = { 'Connected':'🟢','Left live message':'💬','Left voicemail':'📬','No answer':'📵','Busy':'🔴','Wrong number':'❌' };
     const DISPOSITIONS = { '17b47fee-58de-441e-a44c-c6300d46f273':'Connected','73a0d17f-1163-4015-bdd5-ec830791da20':'Left live message','a4c4c377-d246-4b32-a13b-75a56a4cd0ff':'Left voicemail','f240bbac-87c9-4f6e-bf70-924b57d47db7':'No answer','9d9162e7-6cf3-4944-bf63-4dff82258764':'Busy','b2cf5968-551e-4856-9783-52b3da59a7d0':'Wrong number' };
