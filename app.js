@@ -15,6 +15,7 @@ const state = {
   queues: [],
   activeQueueId: null,
   pipeline: [],
+  pipelineSortByStage: false,
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
@@ -385,7 +386,7 @@ async function renderDashboard() {
   const main = document.getElementById('main');
   const today = new Date();
   const dateStr = today.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
-  const pStatuses = PIPELINE_STATUSES;
+  const pStatuses = getPipelineStatuses();
   const stageCounts = {};
   state.pipeline.forEach(p => { stageCounts[p.status] = (stageCounts[p.status] || 0) + 1; });
 
@@ -414,7 +415,10 @@ async function renderDashboard() {
       </div>
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">Pipeline</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">Pipeline</div>
+            <span style="font-size:10px;color:var(--text3);cursor:pointer;border:1px solid var(--border2);padding:1px 6px;border-radius:4px" onclick="openPipelineLabelEditor()">✏️ Edit</span>
+          </div>
           <span style="font-size:11px;color:var(--blue);cursor:pointer" onclick="showView('pipeline')">${state.pipeline.length} total →</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:5px">
@@ -810,39 +814,49 @@ async function updatePipelineStatus(companyId, status) {
 }
 
 const PIPELINE_STATUSES = {
-  hot_lead:       { label: 'Hot Lead',       color: 'var(--red)',    bg: 'rgba(240,82,82,.15)' },
-  following_up:   { label: 'Following Up',   color: 'var(--amber)',  bg: 'rgba(245,166,35,.15)' },
-  contacted:      { label: 'Contacted',      color: 'var(--blue)',   bg: 'rgba(79,142,247,.15)' },
-  proposal_sent:  { label: 'Proposal Sent',  color: 'var(--purple)', bg: 'rgba(167,139,250,.15)' },
-  closed:         { label: 'Closed',         color: 'var(--green)',  bg: 'rgba(62,207,142,.15)' },
+  hot_lead:       { label: 'Hot Lead',       color: '#f05252', bg: 'rgba(240,82,82,.15)' },
+  following_up:   { label: 'Following Up',   color: '#f5a623', bg: 'rgba(245,166,35,.15)' },
+  contacted:      { label: 'Contacted',      color: '#4f8ef7', bg: 'rgba(79,142,247,.15)' },
+  proposal_sent:  { label: 'Proposal Sent',  color: '#a78bfa', bg: 'rgba(167,139,250,.15)' },
+  closed:         { label: 'Closed',         color: '#3ecf8e', bg: 'rgba(62,207,142,.15)' },
 };
 
 async function renderPipeline() {
   const main = document.getElementById('main');
+  const STATUSES = getPipelineStatuses();
+  const stageOrder = Object.keys(STATUSES);
+  let items = [...state.pipeline];
+  if (state.pipelineSortByStage) {
+    items.sort((a, b) => {
+      const ai = stageOrder.indexOf(a.status ?? ''), bi = stageOrder.indexOf(b.status ?? '');
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+  }
   main.innerHTML = `
     <div class="topbar">
       <div class="topbar-left">
         <h2>📌 Pipeline</h2>
         <p>${state.pipeline.length} companies being tracked</p>
       </div>
-      <div class="topbar-right">
+      <div class="topbar-right" style="display:flex;gap:8px">
+        <button class="btn btn-sm ${state.pipelineSortByStage ? 'btn-primary' : ''}" onclick="state.pipelineSortByStage=!state.pipelineSortByStage;renderPipeline()">Sort by Stage</button>
         <button class="btn btn-sm" onclick="openPipelineLabelEditor()">✏️ Edit Stages</button>
       </div>
     </div>
     <div class="content">
-      ${state.pipeline.length === 0
+      ${items.length === 0
         ? `<div class="empty-state" style="text-align:center;padding:60px 20px;color:var(--text2)">
             <div style="font-size:40px;margin-bottom:12px">📌</div>
             <div style="font-size:15px;font-weight:600;margin-bottom:6px">No companies in pipeline</div>
             <div style="font-size:13px">Open any company and click "Add to Pipeline" to start tracking it.</div>
            </div>`
         : `<div class="lead-list">
-            ${state.pipeline.map(p => {
-              const STATUSES = getPipelineStatuses(); const s = STATUSES[p.status] || STATUSES.following_up;
+            ${items.map(p => {
+              const s = STATUSES[p.status] || STATUSES.following_up || Object.values(STATUSES)[0];
               const daysIn = Math.floor((Date.now() - new Date(p.addedAt)) / 86400000);
               const contact = state.contacts.find(c => c.id === p.companyId);
               const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${p.companyId}`;
-              return `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius)">
+              return `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${s.color};border-radius:var(--radius)">
                 <div style="flex:1;min-width:0">
                   <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                     <span style="cursor:pointer;text-decoration:underline;text-underline-offset:3px" onclick="openContact('${p.companyId}')">${p.companyName}</span>
@@ -2880,20 +2894,37 @@ document.addEventListener('click', e => {
 
 
 // ─── PIPELINE LABELS ──────────────────────────────────────────────────────────
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function getPipelineStatuses() {
   const defaults = {
-    hot_lead:      { label: 'Hot Lead',      color: 'var(--red)',    bg: 'rgba(240,82,82,.15)' },
-    following_up:  { label: 'Following Up',  color: 'var(--amber)',  bg: 'rgba(245,166,35,.15)' },
-    contacted:     { label: 'Contacted',     color: 'var(--blue)',   bg: 'rgba(79,142,247,.15)' },
-    proposal_sent: { label: 'Proposal Sent', color: 'var(--purple)', bg: 'rgba(167,139,250,.15)' },
-    closed:        { label: 'Closed',        color: 'var(--green)',  bg: 'rgba(62,207,142,.15)' },
+    hot_lead:      { label: 'Hot Lead',      color: '#f05252' },
+    following_up:  { label: 'Following Up',  color: '#f5a623' },
+    contacted:     { label: 'Contacted',     color: '#4f8ef7' },
+    proposal_sent: { label: 'Proposal Sent', color: '#a78bfa' },
+    closed:        { label: 'Closed',        color: '#3ecf8e' },
   };
+  const statuses = {};
+  for (const [k, v] of Object.entries(defaults)) statuses[k] = { ...v };
   if (state.pipelineLabels) {
-    for (const [k, label] of Object.entries(state.pipelineLabels)) {
-      if (defaults[k]) defaults[k].label = label;
+    for (const [k, v] of Object.entries(state.pipelineLabels)) {
+      if (typeof v === 'string') {
+        if (statuses[k]) statuses[k].label = v;
+      } else {
+        if (statuses[k]) {
+          if (v.label) statuses[k].label = v.label;
+          if (v.color) statuses[k].color = v.color;
+        } else {
+          statuses[k] = { label: v.label || k, color: v.color || '#4f8ef7' };
+        }
+      }
     }
   }
-  return defaults;
+  for (const s of Object.values(statuses)) s.bg = hexToRgba(s.color, 0.15);
+  return statuses;
 }
 
 async function loadPipelineLabels() {
@@ -2905,17 +2936,24 @@ async function loadPipelineLabels() {
   } catch {}
 }
 
+const DEFAULT_PIPELINE_KEYS = new Set(['hot_lead','following_up','contacted','proposal_sent','closed']);
+
 function openPipelineLabelEditor() {
   const statuses = getPipelineStatuses();
-  document.getElementById('modal-title').innerHTML = '✏️ Customize Stage Labels';
+  const rowHtml = (key, { label, color }, isCustom) =>
+    `<div id="label-row-${key}" style="display:flex;align-items:center;gap:10px">
+      <input type="color" id="color-${key}" value="${color}" style="width:32px;height:32px;border:1px solid var(--border2);border-radius:4px;cursor:pointer;padding:2px;background:var(--bg3)" />
+      <input id="label-${key}" value="${label}" placeholder="Stage name" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
+      ${isCustom ? `<button onclick="document.getElementById('label-row-${key}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;flex-shrink:0">×</button>` : `<div style="width:28px"></div>`}
+    </div>`;
+  document.getElementById('modal-title').innerHTML = '✏️ Customize Pipeline Stages';
   document.getElementById('modal-body').innerHTML = `
     <div style="display:flex;flex-direction:column;gap:12px">
-      <div style="font-size:13px;color:var(--text2);margin-bottom:4px">Rename pipeline stages to match how your team thinks about deals.</div>
-      ${Object.entries(statuses).map(([key, { label, color }]) => `
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></div>
-          <input id="label-${key}" value="${label}" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
-        </div>`).join('')}
+      <div style="font-size:13px;color:var(--text2)">Rename stages, change colors, or add up to 10 total. Default stages can't be removed.</div>
+      <div id="label-rows" style="display:flex;flex-direction:column;gap:8px">
+        ${Object.entries(statuses).map(([k, v]) => rowHtml(k, v, !DEFAULT_PIPELINE_KEYS.has(k))).join('')}
+      </div>
+      <button onclick="addPipelineLabelRow()" style="background:none;border:1px dashed var(--border2);border-radius:6px;padding:9px;color:var(--text2);cursor:pointer;font-size:13px;text-align:center;width:100%">+ Add Stage</button>
     </div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
@@ -2923,12 +2961,29 @@ function openPipelineLabelEditor() {
   document.getElementById('modal').style.display = 'flex';
 }
 
+function addPipelineLabelRow() {
+  const rows = document.getElementById('label-rows');
+  if (rows.children.length >= 10) { toast('Maximum 10 stages', 'error'); return; }
+  const key = `custom_${Date.now()}`;
+  const div = document.createElement('div');
+  div.id = `label-row-${key}`;
+  div.style.cssText = 'display:flex;align-items:center;gap:10px';
+  div.innerHTML = `
+    <input type="color" id="color-${key}" value="#4f8ef7" style="width:32px;height:32px;border:1px solid var(--border2);border-radius:4px;cursor:pointer;padding:2px;background:var(--bg3)" />
+    <input id="label-${key}" value="" placeholder="Stage name" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
+    <button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;line-height:1;padding:0 4px;flex-shrink:0">×</button>`;
+  rows.appendChild(div);
+}
+
 async function savePipelineLabels() {
-  const statuses = getPipelineStatuses();
+  const rows = document.getElementById('label-rows');
   const labels = {};
-  for (const [key, { label: def }] of Object.entries(statuses)) {
-    const input = document.getElementById(`label-${key}`);
-    labels[key] = input?.value.trim() || def;
+  for (const row of rows.children) {
+    const key = row.id.replace('label-row-', '');
+    const label = document.getElementById(`label-${key}`)?.value.trim();
+    const color = document.getElementById(`color-${key}`)?.value || '#4f8ef7';
+    if (!label) continue;
+    labels[key] = { label, color };
   }
   try {
     await fetch('/api/pipeline', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ action: 'labels', labels }) });
@@ -2936,6 +2991,7 @@ async function savePipelineLabels() {
     toast('Stage labels saved ✓', 'success');
     closeModal();
     if (state.currentView === 'pipeline') renderPipeline();
+    if (state.currentView === 'dashboard') renderDashboard();
   } catch { toast('Failed to save labels', 'error'); }
 }
 
