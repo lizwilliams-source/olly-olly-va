@@ -1588,28 +1588,46 @@ async function showHubSpotCallPicker(companyId) {
   content.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px;justify-content:center"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Fetching calls from HubSpot...</div>`;
 
   try {
-    // Step 1: get call IDs directly associated with this company
-    const assocRes = await fetch('/api/hubspot', {
-      headers: { 'X-HubSpot-Path': `/crm/v4/objects/companies/${companyId}/associations/calls`, Authorization: `Bearer ${state.token}` },
-    });
-    const assocData = await assocRes.json();
-    const callIds = (assocData.results || []).map(a => String(a.toObjectId));
+    // Step 1: get call IDs via direct company assoc + via contacts (in parallel)
+    const [directRes, contactsRes] = await Promise.all([
+      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/calls`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
+      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
+    ]);
+    console.log('[calls] direct:', directRes, 'contacts:', contactsRes);
 
-    if (!callIds.length) {
+    const directCallIds = (directRes.results || []).map(a => a.id);
+    const contactIds = (contactsRes.results || []).map(a => a.id).slice(0, 8);
+
+    let contactCallIds = [];
+    if (contactIds.length) {
+      const perContact = await Promise.all(
+        contactIds.map(cid =>
+          fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${cid}/associations/calls`, Authorization: `Bearer ${state.token}` } })
+            .then(r => r.json()).then(d => (d.results || []).map(a => a.id))
+        )
+      );
+      contactCallIds = perContact.flat();
+    }
+
+    const allCallIds = [...new Set([...directCallIds, ...contactCallIds])];
+    console.log('[calls] all IDs:', allCallIds);
+
+    if (!allCallIds.length) {
       content.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text2)">
-        <div style="font-size:13px;margin-bottom:12px">No recorded calls found in HubSpot for this company.</div>
+        <div style="font-size:13px;margin-bottom:12px">No calls found in HubSpot for this company.</div>
         <button class="btn btn-primary" onclick="showUploadInterface('${companyId}')">📁 Upload recording instead</button>
       </div>`;
       return;
     }
 
-    // Step 2: batch-read properties for those calls (cap at 25)
+    // Step 2: batch-read properties for those calls (cap at 25 most recent)
     const batchRes = await fetch('/api/hubspot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ inputs: callIds.slice(0, 25).map(id => ({ id })), properties: ['hs_call_recording_url','hs_timestamp','hs_call_duration','hs_call_status','hs_call_disposition','hs_call_direction','hs_call_body'] }),
+      body: JSON.stringify({ inputs: allCallIds.slice(0, 25).map(id => ({ id })), properties: ['hs_call_recording_url','hs_timestamp','hs_call_duration','hs_call_status','hs_call_disposition','hs_call_direction','hs_call_body'] }),
     });
     const batchData = await batchRes.json();
+    console.log('[calls] batch results:', batchData.results?.map(c => ({ id: c.id, recording: !!c.properties.hs_call_recording_url, status: c.properties.hs_call_status })));
     const calls = (batchData.results || [])
       .filter(c => c.properties.hs_call_recording_url)
       .sort((a, b) => new Date(b.properties.hs_timestamp) - new Date(a.properties.hs_timestamp));
