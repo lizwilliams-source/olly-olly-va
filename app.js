@@ -3030,7 +3030,8 @@ async function generateEmailDraft(companyId) {
     document.getElementById('modal-footer').innerHTML = `
       <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
       <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
-      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send via Gmail</button>`;
+      <button class="btn btn-sm" onclick="openMailto()">↗ Open in Gmail</button>
+      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send</button>`;
   } catch (e) {
     document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
     document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
@@ -3049,14 +3050,14 @@ async function sendEmail(companyId) {
   try {
     const res = await fetch('/api/calendar?action=send-email', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ to, subject, body, images: state._emailImages || [] }) });
     const data = await res.json();
-    if (data.needsConnect) { if (confirm('Gmail permission needed. Reconnect Google?')) connectGoogleCalendar(); if (btn) { btn.textContent = 'Send via Gmail'; btn.disabled = false; } return; }
+    if (data.needsConnect) { if (confirm('Gmail permission needed. Reconnect Google?')) connectGoogleCalendar(); if (btn) { btn.textContent = 'Send'; btn.disabled = false; } return; }
     if (!res.ok) throw new Error(data.error || 'Send failed');
     toast('Email sent ✓', 'success');
     if (companyId && companyId !== '__standalone__') {
       fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text: `Email sent to ${to}\nSubject: ${subject}\n\n${body}`, type: 'email' }) }).catch(() => {});
     }
     closeModal();
-  } catch (e) { toast('Failed: ' + e.message, 'error'); if (btn) { btn.textContent = 'Send via Gmail'; btn.disabled = false; } }
+  } catch (e) { toast('Failed: ' + e.message, 'error'); if (btn) { btn.textContent = 'Send'; btn.disabled = false; } }
 }
 
 async function applyEmailTemplate(companyId, templateId) {
@@ -3141,7 +3142,8 @@ async function applyEmailTemplate(companyId, templateId) {
     document.getElementById('modal-footer').innerHTML = `
       <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
       <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
-      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send via Gmail</button>`;
+      <button class="btn btn-sm" onclick="openMailto()">↗ Open in Gmail</button>
+      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send</button>`;
   } catch (e) {
     document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
     document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
@@ -3152,6 +3154,13 @@ function copyEmailDraft() {
   const s = document.getElementById('email-subject')?.value || '';
   const b = document.getElementById('email-body')?.value || '';
   navigator.clipboard.writeText(`Subject: ${s}\n\n${b}`).then(() => toast('Copied ✓', 'success')).catch(() => toast('Copy failed', 'error'));
+}
+
+function openMailto() {
+  const to = document.getElementById('email-to')?.value || '';
+  const subject = document.getElementById('email-subject')?.value || '';
+  const body = document.getElementById('email-body')?.value || '';
+  window.open(`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
 }
 
 // ─── COMPANY TABLE VIEW (sortable + column picker) ────────────────────────────

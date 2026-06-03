@@ -18,23 +18,20 @@ export default async function handler(req, res) {
     });
 
     const tokens = await tokenRes.json();
-    if (!tokens.refresh_token) throw new Error('No refresh token received');
 
-    // Get session to find user email
     const KV_URL = process.env.KV_REST_API_URL;
     const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+    const kvH = { Authorization: `Bearer ${KV_TOKEN}` };
 
-    const sessionRes = await fetch(`${KV_URL}/get/${encodeURIComponent(`session:${sessionToken}`)}`, {
-      headers: { Authorization: `Bearer ${KV_TOKEN}` },
-    });
+    const sessionRes = await fetch(`${KV_URL}/get/${encodeURIComponent(`session:${sessionToken}`)}`, { headers: kvH });
     const sessionData = await sessionRes.json();
     const session = sessionData.result ? JSON.parse(sessionData.result) : null;
     if (!session) throw new Error('Session not found');
 
-    // Save Google tokens
-    await fetch(`${KV_URL}/set/${encodeURIComponent(`gtoken:${session.email}`)}/${encodeURIComponent(JSON.stringify({ refresh_token: tokens.refresh_token }))}`, {
-      headers: { Authorization: `Bearer ${KV_TOKEN}` },
-    });
+    // Save new refresh token if Google returned one; otherwise keep existing
+    if (tokens.refresh_token) {
+      await fetch(`${KV_URL}/set/${encodeURIComponent(`gtoken:${session.email}`)}/${encodeURIComponent(JSON.stringify({ refresh_token: tokens.refresh_token }))}`, { headers: kvH });
+    }
 
     // Redirect back to app
     res.redirect('https://olly-olly-va.vercel.app?calendar=connected');
