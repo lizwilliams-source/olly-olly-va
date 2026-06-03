@@ -3072,17 +3072,31 @@ async function applyEmailTemplate(companyId, templateId) {
   const website = c.rawProps?.website || c.rawProps?.domain || '';
 
   try {
-    const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-      system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible-sounding online presence issues for a prospecting email.`,
-      messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with:\n- "firstName": decision maker's first name from notes if found, otherwise ""\n- "finding1": completes the sentence "One thing I noticed was ___" — should flow conversationally, lowercase start, 1-2 sentences (e.g. "your Google Business Profile looks like it hasn't been claimed yet — no reviews, missing hours, and the address info seems incomplete.")\n- "finding2": completes the sentence "I also came across ___" — a different issue, same conversational tone (e.g. "that your website doesn't have any location-specific pages, which likely makes it hard for you to show up when people in your area search for what you offer.")` }],
-      max_tokens: 400,
-    })});
-    const data = await res.json();
+    // Fetch HubSpot contact name + AI findings in parallel
+    const [aiRes, contactRes] = await Promise.all([
+      fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+        system: `You are an SEO research assistant for Olly Olly, an agency that sells digital marketing to home service contractors. Generate specific, credible-sounding online presence issues for a prospecting email.`,
+        messages: [{ role: 'user', content: `Company: ${c.name}\nLocation: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}\nStage: ${c.stage || ''}\nLead source: ${c.leadSource || ''}\n${website ? 'Website: ' + website : ''}\n${notes ? 'Notes:\n' + notes : ''}\n\nReturn ONLY a JSON object with:\n- "finding1": completes the sentence "One thing I noticed was ___" — conversational, lowercase start, 1-2 sentences (e.g. "your Google Business Profile looks like it hasn't been claimed yet — no reviews, missing hours, and the address info seems incomplete.")\n- "finding2": completes the sentence "I also came across ___" — a different issue, same tone (e.g. "that your website doesn't have any location-specific pages, which likely makes it hard for you to show up when people in your area search for what you offer.")` }],
+        max_tokens: 350,
+      })},
+      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})),
+    ]);
+
+    // Extract first name from first associated contact
+    let firstName = '';
+    const contactIds = (contactRes.results || []).map(a => a.id);
+    if (contactIds.length) {
+      try {
+        const cd = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${contactIds[0]}?properties=firstname,lastname`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+        firstName = cd.properties?.firstname || '';
+      } catch {}
+    }
+
+    const data = await aiRes.json();
     const text = data.content?.[0]?.text || '';
-    let firstName = '', finding1 = '[INSERT FINDING #1]', finding2 = '[INSERT FINDING #2]';
+    let finding1 = '[INSERT FINDING #1]', finding2 = '[INSERT FINDING #2]';
     try {
       const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-      firstName = parsed.firstName || '';
       finding1 = parsed.finding1 || finding1;
       finding2 = parsed.finding2 || finding2;
     } catch {}
@@ -3125,7 +3139,7 @@ const EMAIL_TEMPLATES = [
     id: 'cadiah',
     name: 'Cadiah Email',
     subject: 'Quick thought on [Company Name]',
-    body: `Hi [First Name],\n\nHope you're doing well.\n\nMy name is Cadiah Gilliland and I work with Olly Olly. I recently connected with [Employee Name] on your team and wanted to reach out personally.\n\nWhile doing some research on your online presence, I noticed a few things that caught my attention and thought it made sense to introduce myself rather than make assumptions about what may or may not already be in the works.\n\nOne thing I noticed was [FINDING_1]\n\nI also came across [FINDING_2]\n\n[INSERT SCREENSHOT HERE]\n[INSERT SCREENSHOT HERE]\n\nI could be completely off base, which is why I'd love to get your perspective. If nothing else, I can share what I found and you can tell me whether it's already being addressed or worth a deeper conversation.\n\nDo you have 15-20 minutes sometime this week or next?\n\nLooking forward to connecting.\n\nBest,\nCadiah Gilliland\nNational Account Executive\nOlly Olly\n\nP.S. If there is someone else on the team who oversees your marketing efforts, feel free to point me in the right direction.`,
+    body: `Hi [First Name],\n\nHope you're doing well.\n\nMy name is Cadiah Gilliland and I work with Olly Olly. I recently connected with [Employee Name] on your team and wanted to reach out personally.\n\nWhile doing some research on your online presence, I noticed a few things that caught my attention and thought it made sense to introduce myself rather than make assumptions about what may or may not already be in the works.\n\nOne thing I noticed was [FINDING_1]\n\nI also came across [FINDING_2]\n\nI could be completely off base, which is why I'd love to get your perspective. If nothing else, I can share what I found and you can tell me whether it's already being addressed or worth a deeper conversation.\n\nDo you have 15-20 minutes sometime this week or next?\n\nLooking forward to connecting.\n\nBest,\nCadiah Gilliland\nNational Account Executive\nOlly Olly\n\nP.S. If there is someone else on the team who oversees your marketing efforts, feel free to point me in the right direction.`,
   },
 ];
 
