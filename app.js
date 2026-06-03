@@ -18,6 +18,7 @@ const state = {
   pipelineSortByStage: false,
   demoTags: {},
   demoAcks: {},
+  calendarDateOffset: 0,
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
@@ -384,10 +385,39 @@ function showView(view) {
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function getCalendarViewDate() {
+  const d = new Date();
+  d.setDate(d.getDate() + (state.calendarDateOffset || 0));
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+async function navigateCalendarDay(n) {
+  if (n === null) state.calendarDateOffset = 0;
+  else state.calendarDateOffset = Math.max(-31, Math.min(31, (state.calendarDateOffset || 0) + n));
+  const d = getCalendarViewDate();
+  const isToday = state.calendarDateOffset === 0;
+  const lbl = document.getElementById('cal-date-label');
+  if (lbl) lbl.textContent = d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+  const todayBtn = document.getElementById('cal-today-btn');
+  if (todayBtn) todayBtn.style.display = isToday ? 'none' : '';
+  const el = document.getElementById('schedule-content');
+  if (el) el.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:40px;color:var(--text2);justify-content:center"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading...</div>`;
+  const s = new Date(d), e = new Date(d); e.setHours(23,59,59,999);
+  try {
+    const calRes = await fetch(`/api/calendar?${new URLSearchParams({ action:'events', timeMin:s.toISOString(), timeMax:e.toISOString() })}`, { headers: { Authorization: `Bearer ${state.token}` } });
+    const data = await calRes.json();
+    state._cachedCalEvents = data.events || [];
+    if (isToday) { state.calendarEvents = data.events || []; renderDemoBanner(); }
+  } catch {}
+  renderScheduleSection();
+}
+
 async function renderDashboard() {
   const main = document.getElementById('main');
-  const today = new Date();
-  const dateStr = today.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+  const viewDate = getCalendarViewDate();
+  const isToday = state.calendarDateOffset === 0;
+  const dateStr = viewDate.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
   const pStatuses = getPipelineStatuses();
   const stageCounts = {};
   state.pipeline.forEach(p => { stageCounts[p.status] = (stageCounts[p.status] || 0) + 1; });
@@ -436,8 +466,13 @@ async function renderDashboard() {
   main.innerHTML = `
     <div class="topbar">
       <div class="topbar-left">
-        <h2>📅 Today</h2>
-        <p>${dateStr}</p>
+        <h2>📅 Schedule</h2>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+          <button class="btn btn-sm" onclick="navigateCalendarDay(-1)" style="padding:3px 10px;font-size:14px">←</button>
+          <span id="cal-date-label" style="font-size:13px;color:var(--text2);min-width:190px;text-align:center">${dateStr}</span>
+          <button class="btn btn-sm" onclick="navigateCalendarDay(1)" style="padding:3px 10px;font-size:14px">→</button>
+          <button id="cal-today-btn" class="btn btn-sm" onclick="navigateCalendarDay(null)" style="display:${isToday ? 'none' : ''};font-size:11px">Today</button>
+        </div>
       </div>
       <div class="topbar-right">
         <button id="refresh-btn" class="btn" onclick="manualRefresh()">⟳ Refresh</button>
@@ -458,13 +493,15 @@ async function renderDashboard() {
 
   updateDashboardCounts();
 
-  const _now = new Date(), _s = new Date(_now), _e = new Date(_now);
-  _s.setHours(0,0,0,0); _e.setHours(23,59,59,999);
+  const _s = new Date(viewDate), _e = new Date(viewDate); _e.setHours(23,59,59,999);
   const _calParams = new URLSearchParams({ action: 'events', timeMin: _s.toISOString(), timeMax: _e.toISOString() });
-  const [tasksRes, calRes] = await Promise.all([
-    fetch('/api/hubspot?action=tasks', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ tasks: [] })),
+  const fetches = [
     fetch(`/api/calendar?${_calParams}`, { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ events: [] })),
-  ]);
+  ];
+  if (isToday) fetches.unshift(fetch('/api/hubspot?action=tasks', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ tasks: [] })));
+  const results = await Promise.all(fetches);
+  const tasksRes = isToday ? results[0] : { tasks: [] };
+  const calRes = results[isToday ? 1 : 0];
   state._cachedTasks = tasksRes.tasks || [];
   state._cachedCalEvents = calRes.events || [];
   if (calRes.events) state.calendarEvents = calRes.events;
@@ -490,14 +527,15 @@ function renderScheduleSection() {
   if (!el) return;
   const showTasks = state.scheduleShowTasks !== false;
   const showCal = state.scheduleShowCal !== false;
+  const isToday = !state.calendarDateOffset;
   const disabled = new Set(state.calendarPrefs?.disabledCalendars || []);
   const filteredCal = (state._cachedCalEvents || []).filter(e => !e.calendarId || !disabled.has(e.calendarId));
   el.innerHTML = `
     <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
-      <button class="btn btn-sm ${showTasks ? 'btn-primary' : ''}" onclick="toggleScheduleFilter('tasks')" style="font-size:11px">✅ Tasks</button>
+      ${isToday ? `<button class="btn btn-sm ${showTasks ? 'btn-primary' : ''}" onclick="toggleScheduleFilter('tasks')" style="font-size:11px">✅ Tasks</button>` : ''}
       <button class="btn btn-sm ${showCal ? 'btn-primary' : ''}" onclick="toggleScheduleFilter('calendar')" style="font-size:11px">📅 Calendar</button>
       <span onclick="showView('settings')" style="font-size:11px;color:var(--text3);margin-left:auto;cursor:pointer;text-decoration:underline">⚙️ Cal settings</span>
-    </div>` + buildScheduleHTML(showTasks ? (state._cachedTasks || []) : [], showCal ? filteredCal : []);
+    </div>` + buildScheduleHTML(showTasks && isToday ? (state._cachedTasks || []) : [], showCal ? filteredCal : [], getCalendarViewDate());
 }
 
 function toggleScheduleFilter(type) {
@@ -506,10 +544,13 @@ function toggleScheduleFilter(type) {
   renderScheduleSection();
 }
 
-function buildScheduleHTML(allTasks, calEvents) {
+function buildScheduleHTML(allTasks, calEvents, viewDate) {
   const today = new Date();
-  const nowMins = today.getHours() * 60 + today.getMinutes();
-  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const vd = viewDate || today;
+  const isViewToday = vd.toDateString() === today.toDateString();
+  const isPastDay = vd < today && !isViewToday;
+  const nowMins = isViewToday ? today.getHours() * 60 + today.getMinutes() : (isPastDay ? 9999 : -1);
+  const todayStart = new Date(vd); todayStart.setHours(0,0,0,0);
   const TASK_ICONS = { CALL: '📞', EMAIL: '✉️', TODO: '✅' };
 
   const taskCard = (task, isOverdue = false) => {
@@ -575,7 +616,7 @@ function buildScheduleHTML(allTasks, calEvents) {
   let nowInserted = false, timelineHtml = '';
   for (let h = START_H; h <= END_H; h++) {
     const slotMins = h * 60;
-    if (!nowInserted && slotMins > nowMins) {
+    if (isViewToday && !nowInserted && slotMins > nowMins) {
       const nowStr = today.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
       timelineHtml += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0 4px 62px"><div style="height:2px;flex:1;background:var(--red)"></div><div style="font-size:11px;font-weight:700;color:var(--red);white-space:nowrap">${nowStr}</div><div style="height:2px;flex:1;background:var(--red)"></div></div>`;
       nowInserted = true;
@@ -585,12 +626,12 @@ function buildScheduleHTML(allTasks, calEvents) {
     const label = new Date(2000,0,1,h).toLocaleTimeString('en-US', { hour:'numeric' });
     timelineHtml += `<div style="display:flex;gap:10px;min-height:${items.length ? 'auto' : '28px'};margin-bottom:${items.length ? '6px' : '0'}">
       <div style="width:52px;flex-shrink:0;text-align:right;padding-top:${items.length ? '10px' : '6px'}"><span style="font-size:11px;font-weight:600;color:${past ? 'var(--text3)' : 'var(--text2)'}">${label}</span></div>
-      <div style="flex:1;border-top:1px solid var(--border);padding-top:${items.length ? '6px' : '0'};display:flex;flex-direction:column;gap:6px;opacity:${past ? '0.55' : '1'}">
+      <div style="flex:1;border-top:1px solid var(--border);padding-top:${items.length ? '6px' : '0'};display:flex;flex-direction:column;gap:6px;opacity:${past ? '0.6' : '1'}">
         ${items.map(i => i.kind === 'event' ? eventCard(i.data) : taskCard(i.data)).join('')}
       </div>
     </div>`;
   }
-  if (!nowInserted) {
+  if (isViewToday && !nowInserted) {
     const nowStr = today.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
     timelineHtml = `<div style="display:flex;align-items:center;gap:8px;margin:4px 0 4px 62px"><div style="height:2px;flex:1;background:var(--red)"></div><div style="font-size:11px;font-weight:700;color:var(--red);white-space:nowrap">${nowStr}</div><div style="height:2px;flex:1;background:var(--red)"></div></div>` + timelineHtml;
   }
@@ -601,9 +642,10 @@ function buildScheduleHTML(allTasks, calEvents) {
 
   if (overdue.length) html += `<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚠️ Overdue — ${overdue.length}</div><div style="display:flex;flex-direction:column;gap:6px">${overdue.map(t => taskCard(t, true)).join('')}</div></div>`;
 
-  if (untimedItems.length) html += `<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Due Today</div><div style="display:flex;flex-direction:column;gap:6px">${untimedItems.map(item => item.kind === 'allday' ? `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius)"><div style="font-size:13px;font-weight:600;color:var(--text)">📅 ${item.data.summary || 'All-day event'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">All day</div></div>` : taskCard(item.data)).join('')}</div></div>`;
+  const dueSectionLabel = isViewToday ? 'Due Today' : vd.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  if (untimedItems.length) html += `<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${dueSectionLabel}</div><div style="display:flex;flex-direction:column;gap:6px">${untimedItems.map(item => item.kind === 'allday' ? `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius)"><div style="font-size:13px;font-weight:600;color:var(--text)">📅 ${item.data.summary || 'All-day event'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">All day</div></div>` : taskCard(item.data)).join('')}</div></div>`;
 
-  if (!overdue.length && !timedItems.length && !untimedItems.length) html = `<div style="text-align:center;padding:60px 20px;color:var(--text2)"><div style="font-size:40px;margin-bottom:12px">🎉</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">All caught up</div><div style="font-size:13px">No tasks or events today.</div></div>`;
+  if (!overdue.length && !timedItems.length && !untimedItems.length) html = `<div style="text-align:center;padding:60px 20px;color:var(--text2)"><div style="font-size:40px;margin-bottom:12px">${isPastDay ? '📭' : '🎉'}</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">${isPastDay ? 'Nothing on record' : 'All caught up'}</div><div style="font-size:13px">${isPastDay ? 'No events found for this day.' : 'No tasks or events today.'}</div></div>`;
 
   return html;
 }
