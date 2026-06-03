@@ -318,5 +318,70 @@ export default async function handler(req, res) {
     return res.status(200).json({ queues });
   }
 
+  if (action === 'setcalprefs') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { disabledCalendars } = req.body;
+    await kvSet(`calprefs:${session.email}`, { disabledCalendars: disabledCalendars || [] });
+    return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'getcalprefs') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const prefs = await kvGet(`calprefs:${session.email}`) || {};
+    return res.status(200).json({ prefs });
+  }
+
+  if (action === 'changepassword') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const user = await kvGet(`user:${session.email}`);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.passwordHash !== hashPassword(currentPassword)) return res.status(401).json({ error: 'Current password is incorrect' });
+    user.passwordHash = hashPassword(newPassword);
+    await kvSet(`user:${session.email}`, user);
+    return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'getnotes') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const { companyId } = req.query;
+    const notes = await kvGet(`notes:${companyId}`) || [];
+    return res.status(200).json({ notes });
+  }
+
+  if (action === 'savenote') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const { companyId, text, date, type } = req.body;
+    if (!companyId || !text) return res.status(400).json({ error: 'companyId and text required' });
+    const existing = await kvGet(`notes:${companyId}`) || [];
+    existing.unshift({ text, date: date || new Date().toLocaleString(), type: type || 'note' });
+    const trimmed = existing.slice(0, 100);
+    await kvSet(`notes:${companyId}`, trimmed);
+    return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'reorderqueue') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Not logged in' });
+    const { queueId, companies } = req.body;
+    const queues = await kvGet(`queues:${session.email}`) || [];
+    const q = queues.find(q => q.id === queueId);
+    if (q) { q.companies = companies; await kvSet(`queues:${session.email}`, queues); }
+    return res.status(200).json({ ok: true });
+  }
+
 return res.status(400).json({ error: 'Unknown action' });
 }

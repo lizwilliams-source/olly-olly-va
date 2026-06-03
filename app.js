@@ -370,6 +370,8 @@ function showView(view) {
     roerisklist: () => renderPriorityView('roerisklist', '⚠️ ROE Risk'),
     followuplist: () => renderPriorityView('followuplist', '🔔 Follow-ups'),
     dnrlist: () => renderPriorityView('dnrlist', '💾 Do Not Recirculate'),
+    settings: renderSettingsView,
+    dialer: renderDialerView,
   };
   document.getElementById('main').innerHTML = '';
   (views[view] || renderDashboard)();
@@ -380,15 +382,56 @@ function showView(view) {
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 async function renderDashboard() {
-  const hot = state.contacts.filter(c => c.score >= 80).length;
-  const callNeeded = state.contacts.filter(c => c.needsCall).length;
-  const followNeeded = state.contacts.filter(c => c.daysSince > 5).length;
+  const main = document.getElementById('main');
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+  const pStatuses = PIPELINE_STATUSES;
+  const stageCounts = {};
+  state.pipeline.forEach(p => { stageCounts[p.status] = (stageCounts[p.status] || 0) + 1; });
 
-  document.getElementById('main').innerHTML = `
+  const sidePanel = () => `
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Priority</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--red);padding:10px 12px" onclick="showView('nevercalled')">
+            <div class="metric-label" style="font-size:10px">📵 Never Called</div>
+            <div class="metric-value" id="count-nevercalled" style="color:var(--red);font-size:22px">...</div>
+          </div>
+          <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--amber);padding:10px 12px" onclick="showView('roerisklist')">
+            <div class="metric-label" style="font-size:10px">⚠️ ROE Risk</div>
+            <div class="metric-value" id="count-roe" style="color:var(--amber);font-size:22px">...</div>
+          </div>
+          <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--blue);padding:10px 12px" onclick="showView('followuplist')">
+            <div class="metric-label" style="font-size:10px">🔔 Follow-ups</div>
+            <div class="metric-value" id="count-followup" style="color:var(--blue);font-size:22px">...</div>
+          </div>
+          <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--green);padding:10px 12px" onclick="showView('dnrlist')">
+            <div class="metric-label" style="font-size:10px">💾 DNR</div>
+            <div class="metric-value" id="count-dnr" style="color:var(--green);font-size:22px">...</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">Pipeline</div>
+          <span style="font-size:11px;color:var(--blue);cursor:pointer" onclick="showView('pipeline')">${state.pipeline.length} total →</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          ${Object.entries(pStatuses).map(([key, { label, color }]) => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${color};border-radius:var(--radius);cursor:pointer" onclick="showView('pipeline')">
+              <span style="font-size:12px;color:var(--text2)">${label}</span>
+              <span style="font-size:14px;font-weight:700;color:${color}">${stageCounts[key] || 0}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+
+  main.innerHTML = `
     <div class="topbar">
       <div class="topbar-left">
-        <h2>Good morning, ${state.user?.name || ''} 👋</h2>
-        <p>${new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })} · Updates every minute</p>
+        <h2>📅 Today</h2>
+        <p>${dateStr}</p>
       </div>
       <div class="topbar-right">
         <button id="refresh-btn" class="btn" onclick="manualRefresh()">⟳ Refresh</button>
@@ -396,75 +439,163 @@ async function renderDashboard() {
       </div>
     </div>
     <div class="content">
-      <div id="ai-daily-insight" class="ai-insight">
-        <div class="ai-insight-header"><div class="ai-insight-icon">✨</div><div class="ai-insight-title">AI Daily Briefing</div></div>
-        <div class="ai-insight-body"><span class="spinner"></span> Analyzing your companies...</div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
-        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--red)" onclick="showView('nevercalled')">
-          <div class="metric-label">📵 Never Called</div>
-          <div class="metric-value" id="count-nevercalled" style="color:var(--red)">...</div>
-          <div class="metric-sub">Click to view →</div>
+      <div style="display:grid;grid-template-columns:1fr 260px;gap:20px;align-items:start">
+        <div id="schedule-content">
+          <div style="display:flex;align-items:center;gap:10px;padding:40px;color:var(--text2);justify-content:center">
+            <div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+            Loading schedule...
+          </div>
         </div>
-        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--amber)" onclick="showView('roerisklist')">
-          <div class="metric-label">⚠️ ROE Risk</div>
-          <div class="metric-value" id="count-roe" style="color:var(--amber)">...</div>
-          <div class="metric-sub">14+ days no call →</div>
-        </div>
-        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--blue)" onclick="showView('followuplist')">
-          <div class="metric-label">🔔 Follow-ups</div>
-          <div class="metric-value" id="count-followup" style="color:var(--blue)">...</div>
-          <div class="metric-sub">Active deals →</div>
-        </div>
-        <div class="metric-card" style="cursor:pointer;border-left:3px solid var(--green)" onclick="showView('dnrlist')">
-          <div class="metric-label">💾 Do Not Recirculate</div>
-          <div class="metric-value" id="count-dnr" style="color:var(--green)">...</div>
-          <div class="metric-sub">Saved in your name →</div>
-        </div>
+        ${sidePanel()}
       </div>
     </div>`;
 
-  const el = document.querySelector('#ai-daily-insight .ai-insight-body');
-  if (el && state.dailyBriefing) {
-    el.innerHTML = state.dailyBriefing.replace(/\n/g,'<br>') +
-      `<div class="ai-chips">
-        <div class="ai-chip" onclick="openAIWithPrompt('Draft follow-up emails for my top 3 priority companies today')">Draft top 3 emails ↗</div>
-        <div class="ai-chip" onclick="showView('myqueue')">Open my queue</div>
-      </div>`;
+  updateDashboardCounts();
+
+  const [tasksRes, calRes] = await Promise.all([
+    fetch('/api/hubspot?action=tasks', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ tasks: [] })),
+    fetch('/api/calendar?action=events', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ events: [] })),
+  ]);
+  state._cachedTasks = tasksRes.tasks || [];
+  state._cachedCalEvents = calRes.events || [];
+  if (calRes.events) state.calendarEvents = calRes.events;
+  if (calRes.calendars) state._availableCalendars = calRes.calendars;
+  renderDemoBanner();
+  renderScheduleSection();
+}
+
+function updateDashboardCounts() {
+  const neverCalled = state.contacts.filter(c => c.isNeverCalledByMe && !c.isDnr).length;
+  const roeRisk = state.contacts.filter(c => c.isRoeRisk && !c.isDnr).length;
+  const followUp = state.contacts.filter(c => c.isFollowUp).length;
+  const dnr = state.contacts.filter(c => c.isDnr).length;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('count-nevercalled', neverCalled); set('badge-nevercalled', neverCalled);
+  set('count-roe', roeRisk);            set('badge-roe', roeRisk);
+  set('count-followup', followUp);      set('badge-followup', followUp);
+  set('count-dnr', dnr);               set('badge-dnr', dnr);
+}
+
+function renderScheduleSection() {
+  const el = document.getElementById('schedule-content');
+  if (!el) return;
+  const showTasks = state.scheduleShowTasks !== false;
+  const showCal = state.scheduleShowCal !== false;
+  const disabled = new Set(state.calendarPrefs?.disabledCalendars || []);
+  const filteredCal = (state._cachedCalEvents || []).filter(e => !e.calendarId || !disabled.has(e.calendarId));
+  el.innerHTML = `
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
+      <button class="btn btn-sm ${showTasks ? 'btn-primary' : ''}" onclick="toggleScheduleFilter('tasks')" style="font-size:11px">✅ Tasks</button>
+      <button class="btn btn-sm ${showCal ? 'btn-primary' : ''}" onclick="toggleScheduleFilter('calendar')" style="font-size:11px">📅 Calendar</button>
+      <span onclick="showView('settings')" style="font-size:11px;color:var(--text3);margin-left:auto;cursor:pointer;text-decoration:underline">⚙️ Cal settings</span>
+    </div>` + buildScheduleHTML(showTasks ? (state._cachedTasks || []) : [], showCal ? filteredCal : []);
+}
+
+function toggleScheduleFilter(type) {
+  if (type === 'tasks') state.scheduleShowTasks = state.scheduleShowTasks !== false ? false : true;
+  if (type === 'calendar') state.scheduleShowCal = state.scheduleShowCal !== false ? false : true;
+  renderScheduleSection();
+}
+
+function buildScheduleHTML(allTasks, calEvents) {
+  const today = new Date();
+  const nowMins = today.getHours() * 60 + today.getMinutes();
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const TASK_ICONS = { CALL: '📞', EMAIL: '✉️', TODO: '✅' };
+
+  const taskCard = (task, isOverdue = false) => {
+    const company = state.contacts.find(c => c.id === task.companyId);
+    const hsUrl = task.companyId ? `https://app.hubspot.com/contacts/45530742/company/${task.companyId}` : null;
+    return `<div style="display:flex;gap:10px;padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isOverdue ? 'var(--red)' : 'var(--amber)'};border-radius:var(--radius)${company ? ';cursor:pointer' : ''}" ${company ? `onclick="openContact('${task.companyId}')"` : ''}>
+      <div style="font-size:16px;flex-shrink:0">${TASK_ICONS[task.type] || '✅'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${task.subject}</div>
+        ${company ? `<div style="display:flex;align-items:center;gap:6px;margin-top:3px"><span style="font-size:12px;color:var(--text2)">${company.name}</span>${hsUrl ? `<a href="${hsUrl}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 5px;border-radius:4px">HS ↗</a>` : ''}</div>` : ''}
+        ${isOverdue ? `<div style="font-size:11px;color:var(--red);margin-top:2px">Due ${new Date(+task.dueAt || task.dueAt).toLocaleDateString('en-US', { month:'short', day:'numeric' })}</div>` : ''}
+      </div>
+    </div>`;
+  };
+
+  const eventCard = (ev) => {
+    const d = new Date(ev.start.dateTime);
+    const timeStr = d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+    const endD = ev.end?.dateTime ? new Date(ev.end.dateTime) : null;
+    const dur = endD ? Math.round((endD - d) / 60000) : null;
+    const durStr = dur ? (dur >= 60 ? `${Math.floor(dur/60)}h${dur%60 ? ' ' + dur%60 + 'm' : ''}` : `${dur}m`) : '';
+    const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').trim().slice(0, 120) : null;
+    return `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius)">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">📅 ${ev.summary || 'Event'}</div>
+        ${ev.htmlLink ? `<a href="${ev.htmlLink}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;white-space:nowrap;flex-shrink:0">Cal ↗</a>` : ''}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${timeStr}${durStr ? ' · ' + durStr : ''}</div>
+      ${ev.location ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">📍 ${ev.location}</div>` : ''}
+      ${cleanDesc ? `<div style="font-size:12px;color:var(--text2);margin-top:5px;line-height:1.5">${cleanDesc}</div>` : ''}
+      ${ev.attendees?.length ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">👥 ${ev.attendees.join(', ')}</div>` : ''}
+    </div>`;
+  };
+
+  // Separate tasks
+  const overdue = allTasks.filter(t => { const d = new Date(+t.dueAt || t.dueAt); return d < todayStart; });
+  const timedItems = [], untimedItems = [];
+  allTasks.filter(t => { const d = new Date(+t.dueAt || t.dueAt); return d >= todayStart; }).forEach(task => {
+    const d = new Date(+task.dueAt || task.dueAt);
+    if (d.getHours() < 6) untimedItems.push({ kind:'task', data: task });
+    else timedItems.push({ kind:'task', data: task, mins: d.getHours()*60+d.getMinutes(), hour: d.getHours() });
+  });
+  calEvents.forEach(ev => {
+    if (ev.start?.dateTime) {
+      const d = new Date(ev.start.dateTime);
+      timedItems.push({ kind:'event', data: ev, mins: d.getHours()*60+d.getMinutes(), hour: d.getHours() });
+    } else { untimedItems.push({ kind:'allday', data: ev }); }
+  });
+  timedItems.sort((a,b) => a.mins - b.mins);
+
+  let html = '';
+
+  // Timeline
+  const START_H = 7, END_H = 21;
+  let nowInserted = false, timelineHtml = '';
+  for (let h = START_H; h <= END_H; h++) {
+    const slotMins = h * 60;
+    if (!nowInserted && slotMins > nowMins) {
+      const nowStr = today.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+      timelineHtml += `<div style="display:flex;align-items:center;gap:8px;margin:4px 0 4px 62px"><div style="height:2px;flex:1;background:var(--red)"></div><div style="font-size:11px;font-weight:700;color:var(--red);white-space:nowrap">${nowStr}</div><div style="height:2px;flex:1;background:var(--red)"></div></div>`;
+      nowInserted = true;
+    }
+    const items = timedItems.filter(i => i.hour === h);
+    const past = slotMins + 60 <= nowMins;
+    const label = new Date(2000,0,1,h).toLocaleTimeString('en-US', { hour:'numeric' });
+    timelineHtml += `<div style="display:flex;gap:10px;min-height:${items.length ? 'auto' : '28px'};margin-bottom:${items.length ? '6px' : '0'}">
+      <div style="width:52px;flex-shrink:0;text-align:right;padding-top:${items.length ? '10px' : '6px'}"><span style="font-size:11px;font-weight:600;color:${past ? 'var(--text3)' : 'var(--text2)'}">${label}</span></div>
+      <div style="flex:1;border-top:1px solid var(--border);padding-top:${items.length ? '6px' : '0'};display:flex;flex-direction:column;gap:6px;opacity:${past ? '0.55' : '1'}">
+        ${items.map(i => i.kind === 'event' ? eventCard(i.data) : taskCard(i.data)).join('')}
+      </div>
+    </div>`;
+  }
+  if (!nowInserted) {
+    const nowStr = today.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+    timelineHtml = `<div style="display:flex;align-items:center;gap:8px;margin:4px 0 4px 62px"><div style="height:2px;flex:1;background:var(--red)"></div><div style="font-size:11px;font-weight:700;color:var(--red);white-space:nowrap">${nowStr}</div><div style="height:2px;flex:1;background:var(--red)"></div></div>` + timelineHtml;
   }
 
-  loadDashboardPanels();
+  const noCalMsg = !timedItems.length ? `<div style="margin:12px 0 8px 62px;font-size:13px;color:var(--text3);font-style:italic">nothing on the calendar yet. feeling otfy?</div>` : '';
+
+  html += `<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Schedule</div>${noCalMsg}${timelineHtml}</div>`;
+
+  if (overdue.length) html += `<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚠️ Overdue — ${overdue.length}</div><div style="display:flex;flex-direction:column;gap:6px">${overdue.map(t => taskCard(t, true)).join('')}</div></div>`;
+
+  if (untimedItems.length) html += `<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Due Today</div><div style="display:flex;flex-direction:column;gap:6px">${untimedItems.map(item => item.kind === 'allday' ? `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius)"><div style="font-size:13px;font-weight:600;color:var(--text)">📅 ${item.data.summary || 'All-day event'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">All day</div></div>` : taskCard(item.data)).join('')}</div></div>`;
+
+  if (!overdue.length && !timedItems.length && !untimedItems.length) html = `<div style="text-align:center;padding:60px 20px;color:var(--text2)"><div style="font-size:40px;margin-bottom:12px">🎉</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">All caught up</div><div style="font-size:13px">No tasks or events today.</div></div>`;
+
+  return html;
 }
 
 async function loadDashboardPanels() {
-  if (!state.ownerId) return;
-  const now = Date.now();
-  const days14 = new Date(now - 14 * 86400000).toISOString();
-  const days3 = new Date(now - 3 * 86400000).toISOString();
-
-  async function fetchPanel(filterGroups, countId, badgeId) {
-    try {
-      const data = await hsPost('/crm/v3/objects/companies/search', { filterGroups, properties: ['name'], limit: 100 });
-      const count = data.results?.length || 0;
-      const countEl = document.getElementById(countId);
-      if (countEl) countEl.textContent = count;
-      const badge = document.getElementById(badgeId);
-      if (badge) badge.textContent = count;
-    } catch(e) {
-      const countEl = document.getElementById(countId);
-      if (countEl) countEl.textContent = '?';
-    }
-  }
-
-  await fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }, { filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_HAS_PROPERTY' }] }], 'count-nevercalled', 'badge-nevercalled');
-  await new Promise(r => setTimeout(r, 300));
-  await fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' }, { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days14 }] }, { filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'NEQ', value: 'Yes' }, { propertyName: 'hubspot_owner_assigneddate', operator: 'LT', value: days3 }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }], 'count-roe', 'badge-roe');
-  await new Promise(r => setTimeout(r, 300));
-  await fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'subscription_status', operator: 'IN', values: ['Demo Set', 'Demo Completed', 'Contract Sent', 'Contract Revision'] }, { propertyName: 'hs_last_logged_call_date', operator: 'LT', value: days3 }, { propertyName: 'notes_next_activity_date', operator: 'NOT_HAS_PROPERTY' }] }], 'count-followup', 'badge-followup');
-  await new Promise(r => setTimeout(r, 300));
-  await fetchPanel([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'dnr', operator: 'EQ', value: 'Yes' }] }], 'count-dnr', 'badge-dnr');
+  // Compute counts from already-loaded state.contacts (no extra HubSpot calls)
+  updateDashboardCounts();
 }
+
 
 // ── MY COMPANIES ──────────────────────────────────────────────────────────────
 function getFilteredContacts() {
@@ -481,66 +612,67 @@ function setContactsFilter(key, val) {
 }
 
 function renderContacts() {
-  const filtered = getFilteredContacts();
+  if (!state.userColumns) state.userColumns = DEFAULT_COLUMNS;
+  const cols = getUserColumns();
+  const { field = 'score', dir = 'desc' } = state.contactsSort || {};
+  let filtered = [...state.contacts]
+    .filter(c => !state.contactsFilterTimezone || c.timezone === state.contactsFilterTimezone)
+    .filter(c => !state.contactsFilterLeadSource || c.leadSource === state.contactsFilterLeadSource)
+    .filter(c => !state.contactsSearch || c.name?.toLowerCase().includes(state.contactsSearch.toLowerCase()));
+  filtered.sort((a, b) => {
+    let av = a[field] ?? a.rawProps?.[field] ?? '', bv = b[field] ?? b.rawProps?.[field] ?? '';
+    if (field === 'daysSince') { av = av === 999 ? 9999 : (av||9999); bv = bv === 999 ? 9999 : (bv||9999); }
+    const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv));
+    return dir === 'desc' ? -cmp : cmp;
+  });
   const pageSize = state.contactsPageSize || 50;
   const page = state.contactsPage || 0;
   const paginated = filtered.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(filtered.length / pageSize);
+  const sortArrow = (col) => field === col ? (dir === 'asc' ? ' ↑' : ' ↓') : '';
+  const gridCols = cols.map(() => 'minmax(120px,1fr)').join(' ') + ' 80px';
 
-  const timezones = [...new Set(state.contacts.map(c => c.timezone).filter(Boolean))].sort();
-  const leadSources = [...new Set(state.contacts.map(c => c.leadSource).filter(Boolean))].sort();
-  const selectStyle = 'font-size:12px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer';
+  const rows = paginated.map(c => {
+    const inQueue = findCompanyQueue(c.id);
+    const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
+    const cells = cols.map(col => {
+      const val = getContactValue(c, col.name);
+      if (col.name === 'name') return `<div style="padding:10px 12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${val}</div>`;
+      if ((col.name === 'phone' || col.name === 'contact_phone_number__') && val) return `<div style="padding:10px 12px" onclick="event.stopPropagation()"><a href="tel:${val.replace(/\D/g,'')}" style="color:var(--green);text-decoration:none;font-weight:600;white-space:nowrap">${val}</a></div>`;
+      if (col.name === 'score') return `<div style="padding:10px 12px"><span class="score-badge score-${c.urgency === 'urgent' ? 'hot' : c.urgency}">${val}</span></div>`;
+      return `<div style="padding:10px 12px;font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${val || '—'}</div>`;
+    }).join('');
+    const queueBtn = inQueue
+      ? `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--purple);border-color:rgba(167,139,250,.4)" onclick="removeFromQueue('${c.id}','${inQueue.id}')">✓</button>`
+      : `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="pickQueueToAdd('${c.id}')">+</button>`;
+    return `<div onclick="openContact('${c.id}')" style="display:grid;grid-template-columns:${gridCols};background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:4px;cursor:pointer;align-items:center">
+      ${cells}
+      <div style="padding:6px 8px;display:flex;gap:4px;align-items:center" onclick="event.stopPropagation()">
+        <a href="${hsUrl}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 5px;border-radius:4px">HS↗</a>
+        ${queueBtn}
+      </div>
+    </div>`;
+  }).join('');
+
+  const pagination = totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:8px;margin-top:12px">${Array.from({length: Math.min(totalPages, 10)}, (_, i) => `<button class="btn btn-sm ${i === page ? 'btn-primary' : ''}" onclick="state.contactsPage=${i};renderContacts()">${i + 1}</button>`).join('')}${totalPages > 10 ? `<span style="color:var(--text3);font-size:12px;padding:6px">...${totalPages} pages</span>` : ''}</div>` : '';
 
   document.getElementById('main').innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${filtered.length} of ${state.contacts.length} companies</p></div>
-      <div class="topbar-right">
-        <input id="contact-search" placeholder="Search companies..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:180px" oninput="filterContacts(this.value)" />
-        <select onchange="setContactsFilter('contactsFilterTimezone',this.value)" style="${selectStyle}">
-          <option value="">All Timezones</option>
-          ${timezones.map(tz => `<option value="${tz}" ${state.contactsFilterTimezone===tz?'selected':''}>${tz}</option>`).join('')}
-        </select>
-        <select onchange="setContactsFilter('contactsFilterLeadSource',this.value)" style="${selectStyle}">
-          <option value="">All Lead Sources</option>
-          ${leadSources.map(ls => `<option value="${ls}" ${state.contactsFilterLeadSource===ls?'selected':''}>${ls}</option>`).join('')}
-        </select>
-        <span style="font-size:12px;color:var(--text2);margin-left:4px">Per page:</span>
-        ${[25,50,100].map(n => `<button class="btn btn-sm ${pageSize===n?'btn-primary':''}" onclick="setContactsPageSize(${n})">${n}</button>`).join('')}
+      <div class="topbar-left"><h2>🏢 My Companies</h2><p>${filtered.length} of ${state.contacts.length}</p></div>
+      <div class="topbar-right" style="gap:6px">
+        <input id="contact-search" value="${state.contactsSearch || ''}" placeholder="Search..." style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;width:160px" oninput="state.contactsSearch=this.value;state.contactsPage=0;renderContacts()" />
+        <button class="btn btn-sm" onclick="openColumnPicker()" style="font-size:12px">⚙️ Columns</button>
+        ${[25, 50, 100].map(n => `<button class="btn btn-sm ${pageSize === n ? 'btn-primary' : ''}" onclick="state.contactsPageSize=${n};state.contactsPage=0;renderContacts()">${n}</button>`).join('')}
       </div>
     </div>
-    <div class="content">
-      <div style="display:grid;grid-template-columns:1fr 160px 160px auto;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Company</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Timezone</div>
-        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Lead Source</div>
+    <div class="content" style="overflow-x:auto">
+      <div style="display:grid;grid-template-columns:${gridCols};border-bottom:2px solid var(--border);margin-bottom:4px;min-width:600px">
+        ${cols.map(col => `<div onclick="setContactsSortCol('${col.name}')" style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;padding:8px 12px;cursor:pointer;white-space:nowrap;user-select:none">${col.label}${sortArrow(col.name)}</div>`).join('')}
         <div></div>
       </div>
-      <div class="lead-list" id="contact-list">${paginated.map(leadCardHTML).join('')}</div>
-      ${totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:8px;margin-top:12px">
-        ${Array.from({length: totalPages}, (_, i) => `<button class="btn btn-sm ${i===page?'btn-primary':''}" onclick="setContactsPage(${i})">${i+1}</button>`).join('')}
-      </div>` : ''}
+      <div id="contact-list" style="min-width:600px">${rows}</div>
+      ${pagination}
     </div>`;
-}
-
-function setContactsPageSize(size) {
-  state.contactsPageSize = size;
-  state.contactsPage = 0;
-  renderContacts();
-}
-
-function setContactsPage(page) {
-  state.contactsPage = page;
-  renderContacts();
-  document.getElementById('contact-list')?.scrollIntoView({ behavior: 'smooth' });
-}
-function filterContacts(q) {
-  const list = document.getElementById('contact-list');
-  const filtered = state.contacts.filter(c =>
-    c.name.toLowerCase().includes(q.toLowerCase()) ||
-    (c.city || '').toLowerCase().includes(q.toLowerCase()) ||
-    (c.industry || '').toLowerCase().includes(q.toLowerCase())
-  );
-  list.innerHTML = filtered.length ? filtered.map(leadCardHTML).join('') : '<div class="empty-state">No companies found</div>';
 }
 
 function leadCardHTML(c) {
@@ -688,6 +820,9 @@ async function renderPipeline() {
         <h2>📌 Pipeline</h2>
         <p>${state.pipeline.length} companies being tracked</p>
       </div>
+      <div class="topbar-right">
+        <button class="btn btn-sm" onclick="openPipelineLabelEditor()">✏️ Edit Stages</button>
+      </div>
     </div>
     <div class="content">
       ${state.pipeline.length === 0
@@ -698,7 +833,7 @@ async function renderPipeline() {
            </div>`
         : `<div class="lead-list">
             ${state.pipeline.map(p => {
-              const s = PIPELINE_STATUSES[p.status] || PIPELINE_STATUSES.following_up;
+              const STATUSES = getPipelineStatuses(); const s = STATUSES[p.status] || STATUSES.following_up;
               const daysIn = Math.floor((Date.now() - new Date(p.addedAt)) / 86400000);
               const contact = state.contacts.find(c => c.id === p.companyId);
               const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${p.companyId}`;
@@ -711,7 +846,7 @@ async function renderPipeline() {
                   <div style="font-size:11px;color:var(--text2);margin-top:3px">${daysIn === 0 ? 'Added today' : `${daysIn} day${daysIn === 1 ? '' : 's'} in pipeline`}${contact ? ` · Last contact: ${contact.lastContacted}` : ''}</div>
                 </div>
                 <select onchange="updatePipelineStatus('${p.companyId}', this.value)" style="font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:${s.bg};color:${s.color};cursor:pointer">
-                  ${Object.entries(PIPELINE_STATUSES).map(([k, v]) => `<option value="${k}" ${p.status === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+                  ${Object.entries(STATUSES).map(([k, v]) => `<option value="${k}" ${p.status === k ? 'selected' : ''}>${v.label}</option>`).join('')}
                 </select>
                 <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3);flex-shrink:0" onclick="removeFromPipeline('${p.companyId}')">Remove</button>
               </div>`;
@@ -758,7 +893,7 @@ async function renderPriorityView(viewKey, title) {
           ${[25,50,100].map(n => `<button class="btn btn-sm per-page-btn ${priorityPageSize===n?'btn-primary':''}" data-size="${n}" onclick="setPriorityPageSize('${viewKey}','${title}',${n})">${n}</button>`).join('')}
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:16px 48px minmax(0,1fr) 180px 180px 160px 36px;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
+      <div style="display:grid;grid-template-columns:16px 48px minmax(0,1fr) 140px 140px 160px 160px 36px;gap:10px;padding:6px 14px;border-bottom:1px solid var(--border);margin-bottom:4px">
         <div style="width:16px"></div>
         <div style="width:48px"></div>
         <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Company</div>
@@ -835,7 +970,12 @@ list.innerHTML = page.map(raw => {
     const colors = [{bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},{bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},{bg:'rgba(167,139,250,.2)',color:'#a78bfa'}];
     const ac = colors[parseInt(raw.id,10) % colors.length];
 
-    return `<div style="display:grid;grid-template-columns:16px 48px minmax(0,1fr) 180px 180px 160px 36px;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : inQueue ? 'var(--purple)' : 'var(--blue)'};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'}" id="prow-${raw.id}">
+    return `<div style="display:grid;grid-template-columns:16px 48px minmax(0,1fr) 180px 180px 160px 36px;align-items:center;gap:10px;padding:8px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isSkipped ? 'var(--text3)' : inQueue ? 'var(--purple)' : (() => {
+          if (viewKey !== 'roerisklist') return 'var(--blue)';
+          const now = Date.now();
+          const lastCall = p.hs_last_logged_call_date ? new Date(p.hs_last_logged_call_date).getTime() : null;
+          return lastCall && (now - lastCall) > 14*86400000 ? 'var(--red)' : 'var(--amber)';
+        })()};border-radius:var(--radius);opacity:${isSkipped ? '0.5' : '1'}" id="prow-${raw.id}">
       <input type="checkbox" class="queue-cb" data-id="${raw.id}" ${inQueue ? 'checked' : ''}
         onchange="handleQueueCheckbox('${viewKey}','${raw.id}',this.checked)"
         style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--purple)" />
@@ -863,6 +1003,22 @@ list.innerHTML = page.map(raw => {
           : rawPhone
             ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none">📞 ${rawPhone}</a>`
             : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
+      </div>
+      <div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        ${viewKey === 'roerisklist' ? (() => {
+          const now = Date.now();
+          const lastCall = p.hs_last_logged_call_date ? new Date(p.hs_last_logged_call_date).getTime() : null;
+          const assigned = p.hubspot_owner_assigneddate ? new Date(p.hubspot_owner_assigneddate).getTime() : null;
+          if (lastCall && (now - lastCall) > 14*86400000) {
+            const d = Math.floor((now-lastCall)/86400000);
+            return `<span style="background:rgba(240,82,82,.15);color:var(--red);padding:2px 6px;border-radius:4px">No call ${d}d</span>`;
+          }
+          if (assigned) {
+            const d = Math.floor((now-assigned)/86400000);
+            return `<span style="background:rgba(245,166,35,.15);color:var(--amber);padding:2px 6px;border-radius:4px">Assigned ${d}d ago</span>`;
+          }
+          return '';
+        })() : ''}
       </div>
     </div>`;
   }).join('');
@@ -1177,6 +1333,17 @@ async function openContact(id) {
   const c = state.contacts.find(x => x.id === id);
   if (!c) return;
   state.selectedContact = c;
+  if (!state.notes) state.notes = {};
+  try {
+    const nr = await fetch(`/api/users?action=getnotes&companyId=${id}`, { headers: { Authorization: `Bearer ${state.token}` } });
+    if (nr.ok) {
+      const { notes: kv } = await nr.json();
+      const sess = state.notes[id] || [];
+      const seen = new Set(sess.map(n => n.date + n.text));
+      state.notes[id] = [...sess, ...kv.filter(n => !seen.has(n.date + n.text))];
+    }
+  } catch {}
+  if (!state.notes) state.notes = {};
   const notes = state.notes[id] || [];
   const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
   const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
@@ -1224,7 +1391,7 @@ async function openContact(id) {
     <button class="btn btn-sm ${inPipeline ? '' : ''}" style="${inPipeline ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="${inPipeline ? `removeFromPipeline('${id}')` : `addToPipeline('${id}')`}; closeModal()">
       ${inPipeline ? '📌 In Pipeline' : '📌 Pipeline'}
     </button>
-    <button class="btn btn-sm" onclick="openAIWithPrompt('Draft a follow-up email to ${c.name}. Stage: ${c.masterStage || c.stage}. Last contacted: ${c.lastContacted}. Be warm and specific.')">✨ Draft email</button>
+    <button class="btn btn-sm" onclick="openEmailCompose('${id}')">✉️ Send email</button>
     <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
 `;
   document.getElementById('modal').style.display = 'flex';
@@ -1236,8 +1403,10 @@ async function saveNote(contactId) {
   if (!text) return;
   try {
     await hsPost('/crm/v3/objects/notes', { properties: { hs_note_body: text, hs_timestamp: Date.now() }, associations: [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }] });
-    toast('Note saved to HubSpot ✓', 'success');
-  } catch { toast('Saved locally (HubSpot sync failed)', 'error'); }
+    toast('Note saved ✓', 'success');
+  } catch { toast('Saved locally', 'error'); }
+  fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId: contactId, text, date: new Date().toLocaleString() }) }).catch(() => {});
+  if (!state.notes) state.notes = {};
   if (!state.notes[contactId]) state.notes[contactId] = [];
   state.notes[contactId].unshift({ text, date: new Date().toLocaleString() });
   input.value = '';
@@ -1272,7 +1441,7 @@ let refreshInterval = null;
 
 async function init() {
   showView('dashboard');
-  await Promise.all([loadContacts(), loadQueue(), loadPipeline()]);
+  await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels()]);
   if (state.currentView === 'dashboard') showView('dashboard');
   loadDailyBriefing();
   startAutoRefresh();
@@ -1359,11 +1528,15 @@ async function loadDailyBriefing() {
 
 function startAutoRefresh() {
   if (refreshInterval) clearInterval(refreshInterval);
+  let _calTick = 0;
   refreshInterval = setInterval(async () => {
     await loadContacts();
+    _calTick++;
+    if (_calTick % 5 === 0) await loadCalendarEvents();
+    else renderDemoBanner();
     if (state.currentView === 'dashboard') showView('dashboard');
     updateBadges();
-  }, 180000);
+  }, 300000);
 }
 
 async function manualRefresh() {
@@ -1400,64 +1573,127 @@ async function openCallLogger(companyId) {
   const c = state.contacts.find(x => x.id === companyId);
   if (!c) return;
 
-  document.getElementById('modal-title').innerHTML = `📞 Log Call — ${c.name}`;
-  document.getElementById('modal-body').innerHTML = `
-    <div id="call-logger-content">
-      <div style="padding:8px 0">
-        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px">Select call type before uploading:</div>
-        <div style="display:flex;flex-direction:column;gap:8px" id="call-type-selector">
-          ${[
-            { key: 'general', icon: '📝', label: 'General Notes', desc: 'Summary, call notes, and follow-up scheduling' },
-            { key: 'sales', icon: '📊', label: 'Sales Notes', desc: 'Goals, pain points, current provider, primary services' },
-            { key: 'demo', icon: '🎯', label: 'Set Call Notes', desc: 'Current marketing, pain points, objections, decision maker info' },
-            { key: 'coaching', icon: '🏆', label: 'Coaching Notes', desc: 'Full scorecard — intro, pitch, tonality, listening, and more' },
-          ].map(t => `
-            <div class="call-type-option" data-type="${t.key}" onclick="selectCallType('${t.key}')"
-              style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .15s">
-              <div style="font-size:24px;flex-shrink:0">${t.icon}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--text)">${t.label}</div>
-                <div style="font-size:11px;color:var(--text2);margin-top:2px">${t.desc}</div>
-              </div>
-            </div>`).join('')}
-        </div>
-<div id="upload-section" style="display:none;margin-top:16px">
-          <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:12px">
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:linear-gradient(135deg,rgba(245,166,35,.06),rgba(240,82,82,.04));border:1px solid rgba(245,166,35,.2);border-radius:var(--radius);cursor:pointer" onclick="toggleCoaching()">
-              <div style="display:flex;align-items:center;gap:10px">
-                <span style="font-size:18px">🏆</span>
-                <div>
-                  <div style="font-size:13px;font-weight:600;color:var(--text)">Include Coaching Scorecard</div>
-                  <div style="font-size:11px;color:var(--text2);margin-top:1px">AI will score this call across 12 areas</div>
-                </div>
-              </div>
-              <div id="coaching-toggle" style="width:40px;height:22px;border-radius:99px;background:var(--bg3);border:1px solid var(--border2);position:relative;transition:all .2s;flex-shrink:0">
-                <div id="coaching-toggle-knob" style="width:16px;height:16px;border-radius:50%;background:var(--text3);position:absolute;top:2px;left:2px;transition:all .2s"></div>
-              </div>
-            </div>
+  document.getElementById('modal-title').innerHTML = `🎙️ Log Call — ${c.name}`;
+  document.getElementById('modal-body').innerHTML = `<div id="call-logger-content"></div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
+  document.getElementById('modal').style.display = 'flex';
+
+  // Default: show HubSpot call picker
+  await showHubSpotCallPicker(companyId);
+}
+
+async function showHubSpotCallPicker(companyId) {
+  const content = document.getElementById('call-logger-content');
+  if (!content) return;
+  content.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px;justify-content:center"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Fetching calls from HubSpot...</div>`;
+
+  try {
+    const res = await fetch('/api/hubspot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': `/crm/v3/objects/calls/search`, 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'associations.company', operator: 'EQ', value: companyId }] }], properties: ['hs_call_recording_url','hs_timestamp','hs_call_duration','hs_call_status','hs_call_disposition','hs_call_direction','hs_call_body'], sorts: [{ propertyName: 'hs_timestamp', direction: 'DESCENDING' }], limit: 25 }),
+    });
+    const data = await res.json();
+    const calls = (data.results || []).filter(c => c.properties.hs_call_recording_url);
+
+    const DISPOSITION_ICONS = { 'Connected':'🟢','Left live message':'💬','Left voicemail':'📬','No answer':'📵','Busy':'🔴','Wrong number':'❌' };
+    const DISPOSITIONS = { '17b47fee-58de-441e-a44c-c6300d46f273':'Connected','73a0d17f-1163-4015-bdd5-ec830791da20':'Left live message','a4c4c377-d246-4b32-a13b-75a56a4cd0ff':'Left voicemail','f240bbac-87c9-4f6e-bf70-924b57d47db7':'No answer','9d9162e7-6cf3-4944-bf63-4dff82258764':'Busy','b2cf5968-551e-4856-9783-52b3da59a7d0':'Wrong number' };
+
+    if (!calls.length) {
+      content.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text2)">
+        <div style="font-size:13px;margin-bottom:12px">No recorded calls found in HubSpot for this company.</div>
+        <button class="btn btn-primary" onclick="showUploadInterface('${companyId}')">📁 Upload recording instead</button>
+      </div>`;
+      return;
+    }
+
+    const rows = calls.map((call, i) => {
+      const p = call.properties;
+      const date = p.hs_timestamp ? new Date(p.hs_timestamp).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' }) : 'Unknown date';
+      const secs = p.hs_call_duration ? Math.round(parseInt(p.hs_call_duration)/1000) : null;
+      const dur = secs ? (secs >= 60 ? `${Math.floor(secs/60)}m ${secs%60}s` : `${secs}s`) : '';
+      const disp = DISPOSITIONS[p.hs_call_disposition] || p.hs_call_disposition || '';
+      const dispIcon = DISPOSITION_ICONS[disp] || '';
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${date}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:3px;display:flex;gap:8px">
+            ${dispIcon && disp ? `<span>${dispIcon} ${disp}</span>` : ''}
+            ${dur ? `<span style="color:var(--text3)">⏱ ${dur}</span>` : ''}
           </div>
-          <div style="border-top:1px solid var(--border);padding-top:16px">
-            <div id="selected-type-label" style="font-size:12px;color:var(--text2);margin-bottom:12px;text-align:center"></div>
-            <input type="file" id="audio-upload" accept="audio/*,.mp3,.mp4,.m4a,.wav,.webm" style="display:none" onchange="handleAudioUpload('${companyId}')" />
-            <button class="btn btn-primary" style="justify-content:center;width:100%;margin-bottom:8px" onclick="document.getElementById('audio-upload').click()">
-              📁 Choose recording file
-            </button>
-            ${state.isAdmin ? `
-            <div style="text-align:center;font-size:11px;color:var(--text3);margin:8px 0">— or —</div>
-            <button class="btn" style="justify-content:center;width:100%;margin-bottom:8px;color:var(--blue);border-color:rgba(79,142,247,.3)" onclick="pickFromHubSpot('${companyId}')">
-              📞 Pick from HubSpot calls (beta)
-            </button>` : ''}
-            <div style="font-size:11px;color:var(--text3);text-align:center">Supports MP3, MP4, M4A, WAV</div>
-          </div>
         </div>
+        <button class="btn btn-primary btn-sm" onclick="selectHubSpotCall('${companyId}',${i})">Select</button>
+      </div>`;
+    }).join('');
+
+    state._hubspotCalls = calls;
+    content.innerHTML = `<div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">${calls.length} recorded call${calls.length !== 1 ? 's' : ''} found</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${rows}</div>
+      <div style="border-top:1px solid var(--border);padding-top:12px">
+        <button class="btn" style="width:100%;justify-content:center;font-size:12px" onclick="showUploadInterface('${companyId}')">📁 Upload recording instead</button>
       </div>
     </div>`;
-
-  document.getElementById('modal-footer').innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
-
-  document.getElementById('modal').style.display = 'flex';
+  } catch (e) {
+    content.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text2)">
+      <div style="font-size:13px;margin-bottom:12px">Could not load HubSpot calls: ${e.message}</div>
+      <button class="btn btn-primary" onclick="showUploadInterface('${companyId}')">📁 Upload recording instead</button>
+    </div>`;
+  }
 }
+
+function selectHubSpotCall(companyId, idx) {
+  state._selectedHsCallIdx = idx;
+  showCallTypeSelector(companyId, 'hubspot');
+}
+
+function showUploadInterface(companyId) {
+  state._selectedHsCallIdx = null;
+  showCallTypeSelector(companyId, 'upload');
+}
+
+function showCallTypeSelector(companyId, source) {
+  const content = document.getElementById('call-logger-content');
+  if (!content) return;
+  const sourceLabel = source === 'hubspot' ? '🔗 HubSpot call selected' : '📁 Upload recording';
+  content.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+    <div style="padding:8px 10px;background:var(--bg3);border-radius:6px;font-size:12px;color:var(--text2)">${sourceLabel}</div>
+    <div>
+      <div class="field-label" style="margin-bottom:8px">Note type</div>
+      <div style="display:flex;flex-direction:column;gap:6px" id="call-type-selector">
+        ${[
+          { key: 'general', icon: '📝', label: 'General Notes', desc: 'Summary, call notes, follow-up scheduling' },
+          { key: 'sales', icon: '📊', label: 'Sales Notes', desc: 'Goals, pain points, current provider, primary services' },
+          { key: 'demo', icon: '🎯', label: 'Set Call Notes', desc: 'Current marketing, pain points, objections, decision maker' },
+          { key: 'coaching', icon: '🏆', label: 'Coaching Notes', desc: 'Full scorecard across 12 areas' },
+        ].map(t => `<div class="call-type-option" data-type="${t.key}" onclick="selectCallType('${t.key}')" style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);cursor:pointer">
+          <div style="font-size:20px;flex-shrink:0">${t.icon}</div>
+          <div><div style="font-size:13px;font-weight:600;color:var(--text)">${t.label}</div><div style="font-size:11px;color:var(--text2);margin-top:1px">${t.desc}</div></div>
+        </div>`).join('')}
+      </div>
+    </div>
+    ${source === 'upload' ? `<div id="upload-trigger-area"></div>` : ''}
+  </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="showHubSpotCallPicker('${companyId}')">← Back</button>
+    <button class="btn btn-primary btn-sm" id="start-transcription-btn" disabled onclick="startTranscription('${companyId}','${source}')">Start →</button>`;
+}
+
+function startTranscription(companyId, source) {
+  if (source === 'upload') {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*,.mp3,.mp4,.m4a,.wav,.webm';
+    input.onchange = async () => {
+      if (input.files[0]) await processCallRecordingWithFile(companyId, input.files[0], null);
+    };
+    input.click();
+  } else if (source === 'hubspot') {
+    const call = state._hubspotCalls?.[state._selectedHsCallIdx];
+    if (call) useHubSpotRecording(companyId, encodeURIComponent(call.properties.hs_call_recording_url));
+  }
+}
+
 
 function toggleCoaching() {
   state.coachingEnabled = !state.coachingEnabled;
@@ -1472,19 +1708,18 @@ function toggleCoaching() {
 
 function selectCallType(type) {
   state.selectedCallType = type;
+  state._selectedCallType = type;
   document.querySelectorAll('.call-type-option').forEach(el => {
     const isSelected = el.dataset.type === type;
     el.style.borderColor = isSelected ? 'var(--blue)' : 'var(--border)';
     el.style.background = isSelected ? 'var(--blue-dim)' : 'var(--bg3)';
   });
-  const labels = {
-    general: '📝 General Notes selected',
-    sales: '📊 Sales Notes selected',
-    demo: '🎯 Demo Set Notes selected',
-    coaching: '🏆 Coaching Notes selected',
-  };
-  document.getElementById('selected-type-label').textContent = labels[type];
-  document.getElementById('upload-section').style.display = 'block';
+  const btn = document.getElementById('start-transcription-btn');
+  if (btn) btn.disabled = false;
+  const uploadSec = document.getElementById('upload-section');
+  if (uploadSec) uploadSec.style.display = 'block';
+  const label = document.getElementById('selected-type-label');
+  if (label) label.textContent = { general:'📝 General Notes', sales:'📊 Sales Notes', demo:'🎯 Set Call Notes', coaching:'🏆 Coaching Notes' }[type] || '';
 }
 
 async function handleAudioUpload(companyId) {
@@ -2053,5 +2288,788 @@ async function useHubSpotRecording(companyId, encodedUrl) {
   }
 }
 
+
+// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+async function renderSettingsView() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-left"><h2>⚙️ Settings</h2></div>
+    </div>
+    <div class="content" style="max-width:560px">
+      <div style="display:flex;flex-direction:column;gap:28px">
+
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">📅 Calendar Preferences</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Choose which calendars appear on your dashboard. Saves permanently to your account.</div>
+          <div id="cal-prefs-section">
+            <div style="font-size:13px;color:var(--text3)">Loading calendars...</div>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔑 Change Password</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Update your login password.</div>
+          <div style="display:flex;flex-direction:column;gap:10px;max-width:340px">
+            <div>
+              <div class="field-label" style="margin-bottom:4px">Current password</div>
+              <input type="password" id="pw-current" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
+            </div>
+            <div>
+              <div class="field-label" style="margin-bottom:4px">New password</div>
+              <input type="password" id="pw-new" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
+            </div>
+            <div>
+              <div class="field-label" style="margin-bottom:4px">Confirm new password</div>
+              <input type="password" id="pw-confirm" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
+            </div>
+            <div id="pw-error" style="font-size:12px;color:var(--red);display:none"></div>
+            <button class="btn btn-primary" style="justify-content:center" onclick="changePassword()">Update password</button>
+          </div>
+        </div>
+
+      </div>
+    </div>`;
+
+  // Load calendars
+  try {
+    const res = await fetch('/api/calendar?action=calendarlist', { headers: { Authorization: `Bearer ${state.token}` } });
+    const data = await res.json();
+    const sec = document.getElementById('cal-prefs-section');
+    if (!sec) return;
+    if (data.notConnected || !data.calendars?.length) {
+      sec.innerHTML = `<div style="font-size:13px;color:var(--text3)">Google Calendar not connected. <button class="btn btn-sm btn-primary" style="margin-left:8px" onclick="connectGoogleCalendar()">Connect now</button></div>`;
+      return;
+    }
+    const disabled = new Set(state.calendarPrefs?.disabledCalendars || []);
+    window._settingsCalendars = data.calendars;
+    sec.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+        ${data.calendars.map(c => `
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 12px;background:var(--bg3);border-radius:6px">
+            <input type="checkbox" id="cal-cb-${c.id.replace(/[^a-z0-9]/gi,'_')}" ${!disabled.has(c.id) ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--blue);cursor:pointer" />
+            <span style="font-size:13px;color:var(--text)">${c.name}</span>
+            ${c.primary ? '<span style="font-size:10px;color:var(--text3);margin-left:4px">(primary)</span>' : ''}
+          </label>`).join('')}
+      </div>
+      <button class="btn btn-primary" onclick="saveCalendarPrefs()" style="font-size:13px">Save preferences</button>`;
+  } catch {
+    const sec = document.getElementById('cal-prefs-section');
+    if (sec) sec.innerHTML = `<div style="font-size:13px;color:var(--text3)">Could not load calendars. <button class="btn btn-sm" onclick="connectGoogleCalendar()">Reconnect Google</button></div>`;
+  }
+}
+
+async function saveCalendarPrefs() {
+  const cals = window._settingsCalendars || [];
+  const disabled = cals.filter(c => {
+    const cb = document.getElementById('cal-cb-' + c.id.replace(/[^a-z0-9]/gi,'_'));
+    return cb && !cb.checked;
+  }).map(c => c.id);
+  state.calendarPrefs = { disabledCalendars: disabled };
+  try {
+    await fetch('/api/users?action=setcalprefs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ disabledCalendars: disabled }),
+    });
+    toast('Calendar preferences saved ✓', 'success');
+  } catch { toast('Failed to save', 'error'); }
+}
+
+async function changePassword() {
+  const current = document.getElementById('pw-current')?.value;
+  const newPw = document.getElementById('pw-new')?.value;
+  const confirm = document.getElementById('pw-confirm')?.value;
+  const errEl = document.getElementById('pw-error');
+  if (errEl) errEl.style.display = 'none';
+  if (!current || !newPw || !confirm) { if (errEl) { errEl.textContent = 'All fields required'; errEl.style.display = 'block'; } return; }
+  if (newPw !== confirm) { if (errEl) { errEl.textContent = 'New passwords do not match'; errEl.style.display = 'block'; } return; }
+  if (newPw.length < 6) { if (errEl) { errEl.textContent = 'Must be at least 6 characters'; errEl.style.display = 'block'; } return; }
+  try {
+    const res = await fetch('/api/users?action=changepassword', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ currentPassword: current, newPassword: newPw }),
+    });
+    const data = await res.json();
+    if (!res.ok) { if (errEl) { errEl.textContent = data.error || 'Failed'; errEl.style.display = 'block'; } return; }
+    toast('Password updated ✓', 'success');
+    ['pw-current','pw-new','pw-confirm'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  } catch { if (errEl) { errEl.textContent = 'Something went wrong'; errEl.style.display = 'block'; } }
+}
+
 // ─── BOOT ─────────────────────────────────────────────────────────────────────
 checkSession();
+
+// ─── DIALER ───────────────────────────────────────────────────────────────────
+
+state.dialerCompany = null;
+state.calendarEvents = [];
+state.calendarPrefs = { disabledCalendars: [] };
+state._cachedTasks = [];
+state._cachedCalEvents = [];
+state._availableCalendars = [];
+
+async function loadCalendarEvents() {
+  try {
+    const res = await fetch('/api/calendar?action=events', { headers: { Authorization: `Bearer ${state.token}` } });
+    const data = await res.json();
+    if (data.events) state.calendarEvents = data.events;
+    if (data.calendars) state._availableCalendars = data.calendars;
+  } catch {}
+  renderDemoBanner();
+}
+
+async function loadCalendarPrefs() {
+  try {
+    const res = await fetch('/api/users?action=getcalprefs', { headers: { Authorization: `Bearer ${state.token}` } });
+    const data = await res.json();
+    if (data.prefs) state.calendarPrefs = { disabledCalendars: data.prefs.disabledCalendars || [] };
+  } catch {}
+}
+
+// ─── DEMO BLOCKER ─────────────────────────────────────────────────────────────
+function demoAckKey(ev) { return `demo_ack_${ev.summary || ''}_${ev.start?.dateTime || ''}`; }
+
+function checkUpcomingDemo() {
+  if (!state.calendarEvents?.length) return null;
+  const now = Date.now(), in10 = now + 10 * 60 * 1000;
+  return state.calendarEvents.find(ev => {
+    if (!ev.start?.dateTime) return false;
+    const s = new Date(ev.start.dateTime).getTime();
+    return s > now && s <= in10 && !localStorage.getItem(demoAckKey(ev));
+  }) || null;
+}
+
+function playDemoSiren() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.4, 0.8].forEach((delay, i) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = i === 2 ? 1100 : 880;
+      gain.gain.setValueAtTime(0.6, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.35);
+      osc.start(ctx.currentTime + delay); osc.stop(ctx.currentTime + delay + 0.35);
+    });
+  } catch {}
+}
+
+let _demoTitleInterval = null, _demoSirenInterval = null;
+
+function renderDemoBanner() {
+  const existing = document.getElementById('demo-alert-banner');
+  const flash = document.getElementById('demo-screen-flash');
+  const upcoming = checkUpcomingDemo();
+
+  if (!upcoming) {
+    if (existing) existing.remove();
+    if (flash) flash.remove();
+    if (_demoTitleInterval) { clearInterval(_demoTitleInterval); _demoTitleInterval = null; document.title = 'Olly Olly'; }
+    if (_demoSirenInterval) { clearInterval(_demoSirenInterval); _demoSirenInterval = null; }
+    updateDialerOverlay();
+    return;
+  }
+
+  const start = new Date(upcoming.start.dateTime);
+  const minsUntil = Math.max(1, Math.round((start.getTime() - Date.now()) / 60000));
+  const timeStr = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const ack = demoAckKey(upcoming);
+  const isNew = !existing;
+
+  if (!document.getElementById('demo-screen-flash')) {
+    const f = document.createElement('div');
+    f.id = 'demo-screen-flash';
+    f.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;border:6px solid #ef4444;z-index:998;animation:demoPulse 0.8s ease-in-out infinite';
+    if (!document.getElementById('demo-pulse-style')) {
+      const s = document.createElement('style'); s.id = 'demo-pulse-style';
+      s.textContent = '@keyframes demoPulse{0%,100%{opacity:0}50%{opacity:1}} @keyframes demoBanner{0%,100%{background:#f59e0b}50%{background:#ef4444}}';
+      document.head.appendChild(s);
+    }
+    document.body.appendChild(f);
+  }
+
+  if (!_demoTitleInterval) {
+    _demoTitleInterval = setInterval(() => {
+      document.title = document.title.startsWith('⚠️') ? 'Olly Olly' : `⚠️ DEMO IN ${minsUntil}m — WRAP UP!`;
+    }, 1000);
+  }
+  if (isNew) { playDemoSiren(); _demoSirenInterval = setInterval(playDemoSiren, 120000); }
+
+  const html = `<div id="demo-alert-banner" style="position:fixed;top:0;left:0;right:0;z-index:1000;color:#111;padding:12px 20px;display:flex;align-items:center;gap:12px;font-size:14px;font-weight:700;box-shadow:0 4px 20px rgba(239,68,68,0.5);animation:demoBanner 0.8s ease-in-out infinite">
+    <span style="font-size:24px">🚨</span>
+    <div style="flex:1;min-width:0">DEMO IN <strong style="font-size:18px">${minsUntil} MIN</strong> — "${upcoming.summary}" at ${timeStr} — FINISH YOUR CALL AND GET READY</div>
+    ${upcoming.htmlLink ? `<a href="${upcoming.htmlLink}" target="_blank" style="color:#111;font-size:11px;border:1px solid rgba(0,0,0,0.3);padding:4px 10px;border-radius:4px;text-decoration:none;white-space:nowrap;font-weight:400">View ↗</a>` : ''}
+    <button onclick="acknowledgeDemoEvent('${ack}')" style="background:#111;color:#f59e0b;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">I KNOW — Acknowledge</button>
+  </div>`;
+  if (existing) existing.outerHTML = html;
+  else document.body.insertAdjacentHTML('afterbegin', html);
+  updateDialerOverlay();
+}
+
+function acknowledgeDemoEvent(ackKey) {
+  localStorage.setItem(ackKey, '1');
+  if (_demoTitleInterval) { clearInterval(_demoTitleInterval); _demoTitleInterval = null; document.title = 'Olly Olly'; }
+  if (_demoSirenInterval) { clearInterval(_demoSirenInterval); _demoSirenInterval = null; }
+  const f = document.getElementById('demo-screen-flash'); if (f) f.remove();
+  renderDemoBanner();
+}
+
+function showDemoBlocker(upcoming, onContinue) {
+  const start = new Date(upcoming.start.dateTime);
+  const minsUntil = Math.max(1, Math.round((start.getTime() - Date.now()) / 60000));
+  const timeStr = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const ack = demoAckKey(upcoming);
+  document.getElementById('modal-title').innerHTML = '⏰ Upcoming Demo';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="text-align:center;padding:16px 0">
+      <div style="font-size:52px;margin-bottom:16px">⏰</div>
+      <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px">You have a demo in ${minsUntil} minute${minsUntil !== 1 ? 's' : ''}</div>
+      <div style="font-size:14px;color:var(--text2);margin-bottom:4px">"${upcoming.summary}"</div>
+      <div style="font-size:13px;color:var(--text3)">at ${timeStr}</div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="closeModal();showView('dashboard')">View Today →</button>
+    <button class="btn btn-primary btn-sm" onclick="acknowledgeDemoEvent('${ack}');closeModal();(${onContinue.toString()})()">Acknowledge & Continue</button>`;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+// ─── DIALER VIEW ──────────────────────────────────────────────────────────────
+async function renderDialerView() {
+  const main = document.getElementById('main');
+  const co = state.dialerCompany;
+
+  if (co?.id) {
+    try {
+      const nr = await fetch(`/api/notes?companyId=${co.id}`, { headers: { Authorization: `Bearer ${state.token}` } });
+      if (nr.ok) {
+        const { notes: kv } = await nr.json();
+        const sess = state.notes?.[co.id] || [];
+        const seen = new Set(sess.map(n => n.date + n.text));
+        if (!state.notes) state.notes = {};
+        state.notes[co.id] = [...sess, ...kv.filter(n => !seen.has(n.date + n.text))];
+      }
+    } catch {}
+  }
+  const notes = co ? (state.notes?.[co.id] || []) : [];
+  const contact = co ? state.contacts.find(c => c.id === co.id) : null;
+  const ta = 'width:100%;min-height:60px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical';
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  const queueCompanies = activeQueue?.companies || [];
+
+  const rightPanel = co ? `
+    <div style="width:300px;flex-shrink:0;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:2px">${co.name}</div>
+        ${contact ? `<div style="font-size:12px;color:var(--text2);margin-bottom:6px">${contact.masterStage || contact.stage || '—'} · Score ${contact.score}/100</div><div style="font-size:12px;color:var(--text3)">Last contact: ${contact.lastContacted}</div>` : ''}
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="openCallLogger('${co.id}')" style="font-size:11px">📝 Log call</button>
+          <a href="https://app.hubspot.com/contacts/45530742/company/${co.id}" target="_blank" class="btn btn-sm" style="font-size:11px;text-decoration:none">HS ↗</a>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:12px 16px">
+        <div class="field-label" style="margin-bottom:8px">Notes</div>
+        <div id="dialer-notes-list">
+          ${notes.length ? notes.slice(0,15).map(n => `<div style="padding:8px 0;border-bottom:1px solid var(--border)"><div style="font-size:10px;color:var(--text3);margin-bottom:3px">${n.date}</div><div style="font-size:12px;color:var(--text2);line-height:1.5;white-space:pre-wrap">${(n.text||'').slice(0,300)}</div></div>`).join('') : '<div style="font-size:12px;color:var(--text3)">No notes yet</div>'}
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid var(--border)">
+        <textarea id="dialer-note-input" placeholder="Quick note..." style="${ta}"></textarea>
+        <button class="btn btn-primary btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="saveDialerNote('${co.id}')">Save note</button>
+      </div>
+    </div>` : `
+    <div style="width:280px;flex-shrink:0;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">📋 ${activeQueue?.name || 'Queue'}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${queueCompanies.length} companies · click to load</div>
+      </div>
+      <div style="flex:1;overflow-y:auto">
+        ${queueCompanies.length === 0 ? `<div style="padding:20px;font-size:13px;color:var(--text3);text-align:center">Queue is empty.</div>` :
+          queueCompanies.map(qc => {
+            const qContact = state.contacts.find(x => x.id === qc.id);
+            return `<div onclick="state.dialerCompany={id:'${qc.id}',name:'${(qc.name||'').replace(/'/g,"\\'")}',phone:'${(qc.phone||'').replace(/'/g,"\\'")}'}; renderDialerView()" style="padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer">
+              <div style="font-size:13px;font-weight:600;color:var(--text)">${qc.name}</div>
+              <div style="font-size:11px;color:var(--text3)">${qc.phone ? `<span style="color:var(--green)">${qc.phone}</span>` : 'No phone'}${qContact ? ` · ${qContact.masterStage || qContact.stage || ''}` : ''}</div>
+            </div>`;
+          }).join('')}
+      </div>
+    </div>`;
+
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-left">
+        <h2>📞 Dialer</h2>
+        ${co ? `<p style="font-weight:600;color:var(--text)">${co.name}${co.phone ? ' · ' + co.phone : ''}</p>` : '<p>Aloware</p>'}
+      </div>
+      <div class="topbar-right" style="gap:6px">
+        <button id="perm-mic" class="btn btn-sm" onclick="requestDialerPermissions()" style="font-size:12px">🎤 Mic</button>
+        <a href="https://app.aloware.com" target="_blank" class="btn btn-sm" style="font-size:12px;text-decoration:none">↗ New tab</a>
+      </div>
+    </div>
+    <div style="display:flex;height:calc(100vh - 61px)">
+      <div style="flex:1;position:relative;min-width:0">
+        <iframe id="aloware-frame" src="https://app.aloware.com" style="width:100%;height:100%;border:none;display:block" allow="microphone *; camera *; notifications *; autoplay *; clipboard-write *"></iframe>
+        <div id="dialer-demo-overlay" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(15,0,0,0.6);backdrop-filter:blur(2px);z-index:10;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+          <div style="font-size:52px">⏰</div>
+          <div id="dialer-overlay-msg" style="font-size:16px;font-weight:700;color:#fff;text-align:center"></div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.6);text-align:center">Acknowledge your upcoming demo before dialing outbound.</div>
+          <div style="display:flex;gap:10px;margin-top:8px">
+            <button onclick="showView('dashboard')" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.3);padding:8px 18px;border-radius:6px;font-size:13px;cursor:pointer">View Today</button>
+            <button id="dialer-ack-btn" style="background:#f59e0b;color:#111;border:none;padding:8px 20px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">Acknowledge & Open Dialer</button>
+          </div>
+        </div>
+      </div>
+      ${rightPanel}
+    </div>`;
+
+  updateDialerOverlay();
+}
+
+async function saveDialerNote(companyId) {
+  const input = document.getElementById('dialer-note-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  try { await hsPost('/crm/v3/objects/notes', { properties: { hs_note_body: text, hs_timestamp: Date.now() }, associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }] }); } catch {}
+  try { await fetch('/api/notes', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text, date: new Date().toLocaleString() }) }); } catch {}
+  if (!state.notes) state.notes = {};
+  if (!state.notes[companyId]) state.notes[companyId] = [];
+  state.notes[companyId].unshift({ text, date: new Date().toLocaleString() });
+  if (input) input.value = '';
+  const list = document.getElementById('dialer-notes-list');
+  if (list) list.innerHTML = state.notes[companyId].slice(0,15).map(n => `<div style="padding:8px 0;border-bottom:1px solid var(--border)"><div style="font-size:10px;color:var(--text3);margin-bottom:3px">${n.date}</div><div style="font-size:12px;color:var(--text2);line-height:1.5;white-space:pre-wrap">${(n.text||'').slice(0,300)}</div></div>`).join('') || '<div style="font-size:12px;color:var(--text3)">No notes yet</div>';
+  toast('Note saved ✓', 'success');
+}
+
+function updateDialerOverlay() {
+  if (state.currentView !== 'dialer') return;
+  const overlay = document.getElementById('dialer-demo-overlay');
+  const frame = document.getElementById('aloware-frame');
+  if (!overlay || !frame) return;
+  const upcoming = checkUpcomingDemo();
+  if (upcoming) {
+    const start = new Date(upcoming.start.dateTime);
+    const minsUntil = Math.max(1, Math.round((start.getTime() - Date.now()) / 60000));
+    const timeStr = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const msg = document.getElementById('dialer-overlay-msg');
+    if (msg) msg.textContent = `🚨 DEMO IN ${minsUntil} MINUTE${minsUntil !== 1 ? 'S' : ''} — "${upcoming.summary}" at ${timeStr}`;
+    const ackBtn = document.getElementById('dialer-ack-btn');
+    if (ackBtn) ackBtn.onclick = () => { acknowledgeDemoEvent(demoAckKey(upcoming)); updateDialerOverlay(); };
+    overlay.style.display = 'flex';
+    frame.style.pointerEvents = 'none'; frame.style.filter = 'blur(3px) brightness(0.4)';
+  } else {
+    overlay.style.display = 'none';
+    frame.style.pointerEvents = ''; frame.style.filter = '';
+  }
+}
+
+async function requestDialerPermissions() {
+  try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); toast('Mic granted ✓', 'success'); } catch { toast('Mic blocked — check browser settings', 'error'); }
+  try { await Notification.requestPermission(); } catch {}
+}
+
+// ─── STANDALONE TRANSCRIPTION ─────────────────────────────────────────────────
+function openStandaloneTranscription() {
+  state._pendingCallFile = null;
+  document.getElementById('modal-title').innerHTML = '🎙️ Transcribe Call';
+  document.getElementById('modal-body').innerHTML = `
+    <div id="call-logger-content">
+      <input type="file" id="audio-upload-standalone" accept="audio/*,.mp3,.mp4,.m4a,.wav,.webm" style="display:none" onchange="handleStandaloneUpload()" />
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div><div class="field-label" style="margin-bottom:4px">Company name <span style="font-weight:400;color:var(--text3)">(optional)</span></div>
+          <input id="standalone-company" placeholder="e.g. ABC Plumbing" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
+        <button class="btn btn-primary" style="justify-content:center;width:100%" onclick="document.getElementById('audio-upload-standalone').click()">📁 Upload recording</button>
+        <div style="font-size:11px;color:var(--text3);text-align:center">MP3, MP4, M4A, WAV supported</div>
+      </div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+async function handleStandaloneUpload() {
+  const file = document.getElementById('audio-upload-standalone')?.files[0];
+  if (!file) return;
+  const companyName = document.getElementById('standalone-company')?.value.trim() || 'Unknown';
+  await processCallRecordingWithFile(null, file, companyName);
+}
+
+async function processCallRecordingWithFile(companyId, file, companyNameOverride) {
+  const c = companyId ? state.contacts.find(x => x.id === companyId) : null;
+  const companyName = c?.name || companyNameOverride || 'Unknown';
+  const callType = state._selectedCallType || 'general';
+
+  document.getElementById('call-logger-content').innerHTML = `
+    <div style="padding:24px 8px">
+      <div id="transcribe-status" style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;text-align:center">Processing...</div>
+      <div style="background:var(--bg3);border-radius:99px;height:8px;overflow:hidden"><div id="transcribe-bar" style="height:100%;width:0%;background:var(--blue);border-radius:99px;transition:width 0.4s ease"></div></div>
+      <div id="transcribe-elapsed" style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px">0s</div>
+    </div>`;
+
+  state.transcribing = true;
+  try {
+    const cacheKey = `transcript_${file.name}_${file.size}_${file.lastModified}`;
+    let transcript = localStorage.getItem(cacheKey);
+    if (transcript) { document.getElementById('transcribe-status').textContent = 'Using cached transcript...'; }
+    else {
+      const { url: whisperUrl, key: whisperKey } = await fetch('/api/transcribe').then(r => r.json());
+      document.getElementById('transcribe-status').textContent = 'Uploading...';
+      document.getElementById('transcribe-bar').style.width = '5%';
+      const uploadRes = await fetch(`${whisperUrl}/transcribe`, { method: 'POST', headers: { 'Authorization': `Bearer ${whisperKey}`, 'Content-Type': 'application/octet-stream' }, body: file });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) throw new Error(`Upload failed: ${uploadData.detail || uploadData.error}`);
+      const { job_id } = uploadData;
+      document.getElementById('transcribe-status').textContent = 'Transcribing...';
+      document.getElementById('transcribe-bar').style.width = '10%';
+      const t0 = Date.now();
+      while (true) {
+        await new Promise(r => setTimeout(r, 3000));
+        const statusData = await fetch(`${whisperUrl}/status/${job_id}`, { headers: { 'Authorization': `Bearer ${whisperKey}` } }).then(r => r.json());
+        if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
+        if (statusData.status === 'done') { transcript = statusData.transcript; break; }
+        const elapsed = Math.round((Date.now() - t0) / 1000);
+        document.getElementById('transcribe-bar').style.width = `${Math.min(90, (elapsed/180)*90)}%`;
+        document.getElementById('transcribe-elapsed').textContent = `${elapsed}s`;
+      }
+      try { localStorage.setItem(cacheKey, transcript); } catch {}
+    }
+    document.getElementById('transcribe-bar').style.width = '100%';
+    document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
+    const analysisRes = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ transcript, companyName, callType }) });
+    const analysisJson = await analysisRes.json();
+    if (!analysisRes.ok) throw new Error(analysisJson.error || 'Analysis failed');
+    state.transcribing = false;
+    showCallAnalysis(companyId || '__standalone__', transcript, analysisJson.analysis);
+  } catch (e) {
+    state.transcribing = false;
+    document.getElementById('call-logger-content').innerHTML = `
+      <div style="text-align:center;padding:20px">
+        <div style="font-size:36px;margin-bottom:12px">❌</div>
+        <div style="font-size:14px;font-weight:600;color:var(--red);margin-bottom:8px">Transcription failed</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:16px">${e.message}</div>
+        <button class="btn btn-primary" onclick="${companyId ? `openCallLogger('${companyId}')` : 'openStandaloneTranscription()'}">Try again</button>
+      </div>`;
+  }
+}
+
+// ─── QUEUE DRAG AND DROP ──────────────────────────────────────────────────────
+let _dragQueueCompanyId = null;
+function queueDragStart(e, id) { _dragQueueCompanyId = id; e.dataTransfer.effectAllowed = 'move'; setTimeout(() => { const el = document.getElementById(`qrow-${id}`); if (el) el.style.opacity = '0.4'; }, 0); }
+function queueDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+function queueDragEnd() { if (_dragQueueCompanyId) { const el = document.getElementById(`qrow-${_dragQueueCompanyId}`); if (el) el.style.opacity = ''; } }
+async function queueDrop(e, targetId, queueId) {
+  e.preventDefault();
+  if (!_dragQueueCompanyId || _dragQueueCompanyId === targetId) return;
+  const q = state.queues.find(q => q.id === queueId);
+  if (!q) return;
+  const from = q.companies.findIndex(c => c.id === _dragQueueCompanyId);
+  const to = q.companies.findIndex(c => c.id === targetId);
+  if (from === -1 || to === -1) return;
+  const companies = [...q.companies];
+  const [moved] = companies.splice(from, 1);
+  companies.splice(to, 0, moved);
+  q.companies = companies;
+  _dragQueueCompanyId = null;
+  renderMyQueue();
+  fetch('/api/users?action=reorderqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId, companies }) }).catch(() => {});
+}
+
+function pickQueueToAdd(companyId) {
+  if (state.queues.length === 0) { toast('Create a queue first', 'error'); return; }
+  if (state.queues.length === 1) { addToQueue(companyId, state.queues[0].id); return; }
+  const c = state.contacts.find(x => x.id === companyId);
+  document.getElementById('modal-title').innerHTML = `Add to Queue — ${c?.name || ''}`;
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">${state.queues.map(q => `<button class="btn" style="justify-content:flex-start;padding:12px 16px" onclick="addToQueue('${companyId}','${q.id}');closeModal()"><span style="font-weight:600">${q.name}</span><span style="font-size:11px;color:var(--text3);margin-left:auto">${q.companies.length} companies</span></button>`).join('')}</div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+// ─── TEL: INTERCEPTOR ─────────────────────────────────────────────────────────
+document.addEventListener('click', e => {
+  const link = e.target.closest('a[href^="tel:"]');
+  if (!link) return;
+  e.preventDefault();
+  const phone = link.href.replace('tel:', '').replace(/\D/g, '');
+  const company = state.contacts.find(c => c.phone?.replace(/\D/g,'') === phone) || null;
+  const proceed = () => {
+    state.dialerCompany = company;
+    if (company?.phone) navigator.clipboard.writeText(company.phone).catch(() => {});
+    showView('dialer');
+  };
+  const upcoming = checkUpcomingDemo();
+  if (upcoming) showDemoBlocker(upcoming, proceed);
+  else proceed();
+}, true);
+
+
+// ─── PIPELINE LABELS ──────────────────────────────────────────────────────────
+function getPipelineStatuses() {
+  const defaults = {
+    hot_lead:      { label: 'Hot Lead',      color: 'var(--red)',    bg: 'rgba(240,82,82,.15)' },
+    following_up:  { label: 'Following Up',  color: 'var(--amber)',  bg: 'rgba(245,166,35,.15)' },
+    contacted:     { label: 'Contacted',     color: 'var(--blue)',   bg: 'rgba(79,142,247,.15)' },
+    proposal_sent: { label: 'Proposal Sent', color: 'var(--purple)', bg: 'rgba(167,139,250,.15)' },
+    closed:        { label: 'Closed',        color: 'var(--green)',  bg: 'rgba(62,207,142,.15)' },
+  };
+  if (state.pipelineLabels) {
+    for (const [k, label] of Object.entries(state.pipelineLabels)) {
+      if (defaults[k]) defaults[k].label = label;
+    }
+  }
+  return defaults;
+}
+
+async function loadPipelineLabels() {
+  try {
+    const res = await fetch('/api/pipeline?action=labels', { headers: { Authorization: `Bearer ${state.token}` } });
+    if (!res.ok) return;
+    const { labels } = await res.json();
+    if (labels) state.pipelineLabels = labels;
+  } catch {}
+}
+
+function openPipelineLabelEditor() {
+  const statuses = getPipelineStatuses();
+  document.getElementById('modal-title').innerHTML = '✏️ Customize Stage Labels';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:4px">Rename pipeline stages to match how your team thinks about deals.</div>
+      ${Object.entries(statuses).map(([key, { label, color }]) => `
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></div>
+          <input id="label-${key}" value="${label}" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
+        </div>`).join('')}
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary btn-sm" onclick="savePipelineLabels()">Save</button>`;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+async function savePipelineLabels() {
+  const statuses = getPipelineStatuses();
+  const labels = {};
+  for (const [key, { label: def }] of Object.entries(statuses)) {
+    const input = document.getElementById(`label-${key}`);
+    labels[key] = input?.value.trim() || def;
+  }
+  try {
+    await fetch('/api/pipeline', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ action: 'labels', labels }) });
+    state.pipelineLabels = labels;
+    toast('Stage labels saved ✓', 'success');
+    closeModal();
+    if (state.currentView === 'pipeline') renderPipeline();
+  } catch { toast('Failed to save labels', 'error'); }
+}
+
+// ─── EMAIL COMPOSE ─────────────────────────────────────────────────────────────
+state._emailNotes = [];
+
+async function openEmailCompose(companyId, useCallContext = false) {
+  const c = state.contacts.find(x => x.id === companyId);
+  if (!c) return;
+  if (!state.notes) state.notes = {};
+  if (!state.notes[companyId]?.length) {
+    try {
+      const nr = await fetch(`/api/users?action=getnotes&companyId=${companyId}`, { headers: { Authorization: `Bearer ${state.token}` } });
+      if (nr.ok) { const { notes: kv } = await nr.json(); state.notes[companyId] = kv; }
+    } catch {}
+  }
+  const baseNotes = state.notes[companyId] || [];
+  const displayNotes = [...baseNotes];
+  if (useCallContext && state.lastCallContext && !displayNotes.find(n => n.text === state.lastCallContext)) {
+    displayNotes.unshift({ text: state.lastCallContext, date: 'Current call', type: 'call_analysis' });
+  }
+  state._emailNotes = displayNotes;
+  const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
+  const defaultInstructions = `Write a follow-up email for ${c.name}. Reference their specific situation and pain points from the selected notes. End with a clear next step.`;
+  const notesHtml = displayNotes.length > 0
+    ? displayNotes.slice(0,10).map((n, i) => {
+        const typeLabel = { call_note:'Call', call_analysis:'Call analysis', sales:'Sales notes', set:'Set call', email:'Email sent', note:'Note' }[n.type] || 'Note';
+        return `<label style="display:flex;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;cursor:pointer;align-items:flex-start">
+          <input type="checkbox" class="note-check" data-idx="${i}" ${i===0?'checked':''} style="margin-top:3px;flex-shrink:0;accent-color:var(--blue);cursor:pointer" />
+          <div style="min-width:0"><div style="font-size:11px;color:var(--text3);margin-bottom:2px">${n.date} · ${typeLabel}</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${(n.text||'').slice(0,180)}</div></div>
+        </label>`;
+      }).join('')
+    : `<div style="font-size:12px;color:var(--text3);padding:8px 0">No saved notes yet. Email will use company info only.</div>`;
+
+  document.getElementById('modal-title').innerHTML = `✉️ Email — ${c.name}`;
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div><div class="field-label" style="margin-bottom:8px">Select notes to include</div><div style="display:flex;flex-direction:column;gap:6px">${notesHtml}</div></div>
+      <div><div class="field-label" style="margin-bottom:4px">Tone</div>
+        <select id="email-tone" style="${ta}">
+          <option value="professional">Professional</option>
+          <option value="casual">Casual / Friendly</option>
+          <option value="consultative">Consultative</option>
+          <option value="direct">Direct / No-fluff</option>
+          <option value="warm">Warm / Relationship-focused</option>
+        </select></div>
+      <div><div class="field-label" style="margin-bottom:4px">Instructions <span style="font-size:11px;color:var(--text3);font-weight:400">(edit to customize)</span></div>
+        <textarea id="email-instructions" style="${ta};min-height:80px;font-family:inherit;resize:vertical;line-height:1.6">${defaultInstructions}</textarea></div>
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
+    <button class="btn btn-primary btn-sm" onclick="generateEmailDraft('${companyId}')">Generate Draft →</button>`;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+async function generateEmailDraft(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  const displayNotes = state._emailNotes || [];
+  const checked = [...document.querySelectorAll('.note-check:checked')];
+  const selectedNotes = checked.map(cb => displayNotes[parseInt(cb.dataset.idx)]).filter(Boolean);
+  const tone = document.getElementById('email-tone')?.value || 'professional';
+  const instructions = document.getElementById('email-instructions')?.value?.trim() || '';
+  const toneMap = { professional:'professional and polished', casual:'casual and friendly', consultative:'consultative and expert', direct:'direct and concise — no fluff', warm:'warm and relationship-focused' };
+  const notesContext = selectedNotes.length > 0 ? `\n\nNotes:\n${selectedNotes.map(n => `[${n.date}]\n${n.text}`).join('\n\n---\n\n')}` : '';
+
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Drafting...</div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
+
+  try {
+    const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+      system: `You write sales follow-up emails for Olly Olly, an SEO agency selling to home service contractors. Tone: ${toneMap[tone] || 'professional'}. Return ONLY a JSON object with "subject" and "body" fields.`,
+      messages: [{ role: 'user', content: `${instructions}\n\nCompany: ${c.name}\nStage: ${c.masterStage || c.stage}\nLast contacted: ${c.lastContacted}${notesContext}` }],
+      max_tokens: 1000,
+    })});
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '';
+    let subject = '', body = '';
+    try { const parsed = JSON.parse(text.replace(/```json|```/g,'').trim()); subject = parsed.subject||''; body = parsed.body||text; }
+    catch { const m = text.match(/Subject:\s*(.+)/i); subject = m ? m[1].trim() : 'Following up'; body = text.replace(/Subject:\s*.+\n?/i,'').trim(); }
+    const ta2 = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
+    document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" placeholder="recipient@example.com" style="${ta2}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta2}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta2};min-height:220px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+    </div>`;
+    document.getElementById('modal-footer').innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
+      <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
+      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send via Gmail</button>`;
+  } catch (e) {
+    document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
+    document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
+  }
+}
+
+async function sendEmail(companyId) {
+  const to = document.getElementById('email-to')?.value.trim();
+  const subject = document.getElementById('email-subject')?.value.trim();
+  const body = document.getElementById('email-body')?.value.trim();
+  if (!to) { toast('Enter a recipient email address', 'error'); return; }
+  if (!subject) { toast('Enter a subject line', 'error'); return; }
+  if (!body) { toast('Email body is empty', 'error'); return; }
+  const btn = document.querySelector('#modal-footer .btn-primary');
+  if (btn) { btn.textContent = 'Sending...'; btn.disabled = true; }
+  try {
+    const res = await fetch('/api/calendar?action=send-email', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ to, subject, body }) });
+    const data = await res.json();
+    if (data.needsConnect) { if (confirm('Gmail permission needed. Reconnect Google?')) connectGoogleCalendar(); if (btn) { btn.textContent = 'Send via Gmail'; btn.disabled = false; } return; }
+    if (!res.ok) throw new Error(data.error || 'Send failed');
+    toast('Email sent ✓', 'success');
+    if (companyId && companyId !== '__standalone__') {
+      fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text: `Email sent to ${to}\nSubject: ${subject}\n\n${body}`, type: 'email' }) }).catch(() => {});
+    }
+    closeModal();
+  } catch (e) { toast('Failed: ' + e.message, 'error'); if (btn) { btn.textContent = 'Send via Gmail'; btn.disabled = false; } }
+}
+
+function copyEmailDraft() {
+  const s = document.getElementById('email-subject')?.value || '';
+  const b = document.getElementById('email-body')?.value || '';
+  navigator.clipboard.writeText(`Subject: ${s}\n\n${b}`).then(() => toast('Copied ✓', 'success')).catch(() => toast('Copy failed', 'error'));
+}
+
+// ─── COMPANY TABLE VIEW (sortable + column picker) ────────────────────────────
+state.contactsSort = state.contactsSort || { field: 'score', dir: 'desc' };
+state.userColumns = null;
+state.allHubSpotProps = null;
+
+const DEFAULT_COLUMNS = [
+  { name: 'name', label: 'Company' },
+  { name: 'contact_phone_number__', label: 'Phone' },
+  { name: 'subscription_status', label: 'Stage' },
+  { name: 'timezone_', label: 'Timezone' },
+  { name: 'lead_source', label: 'Lead Source' },
+  { name: 'score', label: 'AI Score' },
+  { name: 'daysSince', label: 'Days Since' },
+];
+
+function getUserColumns() {
+  if (state.userColumns) return state.userColumns;
+  try { const s = localStorage.getItem('oo_columns'); if (s) { state.userColumns = JSON.parse(s); return state.userColumns; } } catch {}
+  state.userColumns = DEFAULT_COLUMNS;
+  return state.userColumns;
+}
+
+function getContactValue(c, colName) {
+  if (colName === 'score') return c.score ?? '';
+  if (colName === 'daysSince') return c.daysSince === 999 ? 'Never' : (c.daysSince + 'd ago');
+  if (colName === 'masterStage' || colName === 'subscription_status') return c.masterStage || c.rawProps?.subscription_status || '';
+  if (colName === 'name') return c.name;
+  if (colName === 'phone' || colName === 'contact_phone_number__') return c.phone || '';
+  if (colName === 'city') return c.city || '';
+  if (colName === 'state') return c.state || '';
+  if (colName === 'timezone_') return c.timezone || '';
+  if (colName === 'lead_source') return c.leadSource || '';
+  if (colName === 'industry') return c.industry || '';
+  return c.rawProps?.[colName] || '';
+}
+
+function setContactsSortCol(col) {
+  const cur = state.contactsSort || { field: 'score', dir: 'desc' };
+  state.contactsSort = { field: col, dir: cur.field === col && cur.dir === 'desc' ? 'asc' : 'desc' };
+  state.contactsPage = 0;
+  renderContacts();
+}
+
+function setContactsSort(val) {
+  const [field, dir] = val.split(':');
+  state.contactsSort = { field, dir };
+  state.contactsPage = 0;
+  renderContacts();
+}
+
+async function openColumnPicker() {
+  document.getElementById('modal-title').innerHTML = '⚙️ Configure Columns';
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px;justify-content:center"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading properties...</div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
+  document.getElementById('modal').style.display = 'flex';
+  if (!state.allHubSpotProps) {
+    try {
+      const res = await fetch('/api/hubspot?action=properties', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({ properties: [] }));
+      state.allHubSpotProps = res.properties || [];
+    } catch {}
+  }
+  const current = getUserColumns().slice();
+  const currentNames = new Set(current.map(c => c.name));
+  window._colCurrent = current;
+  window._colCurrentNames = currentNames;
+  window.renderColPicker = () => {
+    document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      <div><div class="field-label" style="margin-bottom:6px">Active columns</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${current.map(c => `<div style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--blue-dim);border:1px solid var(--blue);border-radius:6px;font-size:12px">${c.label}${c.name!=='name'?`<button onclick="window._removeCol('${c.name}')" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;padding:0;line-height:1">×</button>`:''}</div>`).join('')}
+        </div></div>
+      <div><div class="field-label" style="margin-bottom:4px">Add property</div>
+        <input id="prop-search" placeholder="Search..." oninput="document.getElementById('prop-list').innerHTML=window._renderProps(this.value)" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 12px;color:var(--text);font-size:13px;outline:none;margin-bottom:8px" />
+        <div id="prop-list" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">${window._renderProps('')}</div>
+      </div></div>`;
+    document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button><button class="btn btn-sm" onclick="state.userColumns=[...DEFAULT_COLUMNS];localStorage.removeItem('oo_columns');closeModal();renderContacts()">Reset</button><button class="btn btn-primary btn-sm" onclick="window._saveCols()">Save</button>`;
+  };
+    window._renderProps = (search) => {
+    const filtered = (state.allHubSpotProps||[]).filter(p => !search || p.label.toLowerCase().includes(search.toLowerCase()) || p.name.toLowerCase().includes(search.toLowerCase())).slice(0,50);
+    return filtered.map(p => {
+      const added = currentNames.has(p.name);
+      const safeLabel = p.label.replace(/'/g, "\'");
+      const btn = added ? '<span style="font-size:11px;color:var(--green)">✓</span>' : '<button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="window._addCol(\'' + p.name + '\',\'' + safeLabel + '\')">Add</button>';
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;background:var(--bg3);border-radius:4px"><div><span style="font-size:12px;color:var(--text)">' + p.label + '</span><span style="font-size:10px;color:var(--text3);margin-left:6px">' + p.name + '</span></div>' + btn + '</div>';
+    }).join('') || '<div style="font-size:12px;color:var(--text3);padding:8px">No matches</div>';
+  };;
+  window._addCol = (name, label) => { if (!currentNames.has(name)) { current.push({ name, label }); currentNames.add(name); } window.renderColPicker(); };
+  window._removeCol = (name) => { const i = current.findIndex(c => c.name === name); if (i !== -1) { current.splice(i,1); currentNames.delete(name); } window.renderColPicker(); };
+  window._saveCols = () => { state.userColumns = [...current]; localStorage.setItem('oo_columns', JSON.stringify(state.userColumns)); closeModal(); renderContacts(); toast('Columns saved ✓', 'success'); };
+  window.renderColPicker();
+}
+

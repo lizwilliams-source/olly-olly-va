@@ -14,6 +14,16 @@ async function savePipeline(email, pipeline) {
   await fetch(`${KV_URL()}/set/${encodeURIComponent(`pipeline:${email}`)}/${encodeURIComponent(JSON.stringify(pipeline))}`, { headers: kvHeaders() });
 }
 
+
+async function getLabels(email) {
+  const res = await fetch(`${KV_URL()}/get/${encodeURIComponent(`pipeline_labels:${email}`)}`, { headers: kvHeaders() });
+  const data = await res.json();
+  return data.result ? JSON.parse(data.result) : null;
+}
+
+async function saveLabels(email, labels) {
+  await fetch(`${KV_URL()}/set/${encodeURIComponent(`pipeline_labels:${email}`)}/${encodeURIComponent(JSON.stringify(labels))}`, { headers: kvHeaders() });
+}
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -25,6 +35,10 @@ export default async function handler(req, res) {
   if (!session?.email) return res.status(401).json({ error: 'Unauthorized' });
 
   if (req.method === 'GET') {
+    if (req.query.action === 'labels') {
+      const labels = await getLabels(session.email);
+      return res.status(200).json({ labels });
+    }
     const pipeline = await getPipeline(session.email);
     return res.status(200).json({ pipeline });
   }
@@ -32,6 +46,12 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const { action, companyId, companyName, status } = req.body;
     let pipeline = await getPipeline(session.email);
+
+    if (action === 'labels') {
+      const { labels } = req.body;
+      await saveLabels(session.email, labels);
+      return res.status(200).json({ ok: true });
+    }
 
     if (action === 'add') {
       if (!pipeline.find(p => p.companyId === companyId)) {
