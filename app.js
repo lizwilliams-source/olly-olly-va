@@ -525,12 +525,12 @@ function buildScheduleHTML(allTasks, calEvents) {
     const cleanDesc = ev.description ? ev.description.replace(/<[^>]*>/g, '').trim().slice(0, 120) : null;
     const tagKey = demoTagKey(ev);
     const isDemo = isTaggedDemo(ev);
-    return `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isDemo ? '#f59e0b' : 'var(--blue)'};border-radius:var(--radius)">
+    return `<div data-tag-key="${tagKey}" style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${isDemo ? '#f59e0b' : 'var(--blue)'};border-radius:var(--radius)">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-        <div style="font-size:13px;font-weight:600;color:var(--text)">${isDemo ? '🎯' : '📅'} ${ev.summary || 'Event'}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)"><span class="event-icon">${isDemo ? '🎯' : '📅'}</span> ${ev.summary || 'Event'}</div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
           ${ev.htmlLink ? `<a href="${ev.htmlLink}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px;white-space:nowrap">Cal ↗</a>` : ''}
-          <button onclick="toggleDemoTag('${tagKey}')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${isDemo ? 'rgba(245,158,11,.4)' : 'var(--border2)'};background:${isDemo ? 'rgba(245,158,11,.15)' : 'transparent'};color:${isDemo ? '#f59e0b' : 'var(--text3)'};cursor:pointer;white-space:nowrap">${isDemo ? '🎯 Demo' : 'Mark Demo'}</button>
+          <button class="demo-tag-btn" onclick="toggleDemoTag('${tagKey}')" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid ${isDemo ? 'rgba(245,158,11,.4)' : 'var(--border2)'};background:${isDemo ? 'rgba(245,158,11,.15)' : 'transparent'};color:${isDemo ? '#f59e0b' : 'var(--text3)'};cursor:pointer;white-space:nowrap">${isDemo ? '🎯 Demo' : 'Mark Demo'}</button>
         </div>
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px">${timeStr}${durStr ? ' · ' + durStr : ''}</div>
@@ -2490,9 +2490,22 @@ function demoAckKey(ev) { return `demo_ack_${ev.summary || ''}_${ev.start?.dateT
 function demoTagKey(ev) { return `demo_tag_${ev.id || (ev.summary || '') + '_' + (ev.start?.dateTime || '')}`; }
 function isTaggedDemo(ev) { return !!localStorage.getItem(demoTagKey(ev)); }
 function toggleDemoTag(key) {
-  if (localStorage.getItem(key)) localStorage.removeItem(key);
-  else localStorage.setItem(key, '1');
-  if (state.currentView === 'today') showView('today');
+  const isNowDemo = !localStorage.getItem(key);
+  if (isNowDemo) localStorage.setItem(key, '1'); else localStorage.removeItem(key);
+  // Update the card in-place — no refetch needed
+  const card = document.querySelector(`[data-tag-key="${key}"]`);
+  if (card) {
+    card.style.borderLeftColor = isNowDemo ? '#f59e0b' : 'var(--blue)';
+    const icon = card.querySelector('.event-icon');
+    if (icon) icon.textContent = isNowDemo ? '🎯' : '📅';
+    const btn = card.querySelector('.demo-tag-btn');
+    if (btn) {
+      btn.textContent = isNowDemo ? '🎯 Demo' : 'Mark Demo';
+      btn.style.borderColor = isNowDemo ? 'rgba(245,158,11,.4)' : 'var(--border2)';
+      btn.style.background = isNowDemo ? 'rgba(245,158,11,.15)' : 'transparent';
+      btn.style.color = isNowDemo ? '#f59e0b' : 'var(--text3)';
+    }
+  }
   renderDemoBanner();
 }
 
