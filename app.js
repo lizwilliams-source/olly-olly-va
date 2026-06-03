@@ -3110,10 +3110,29 @@ async function applyEmailTemplate(companyId, templateId) {
       .replace('[FINDING_1]', finding1)
       .replace('[FINDING_2]', finding2);
 
+    const websiteThumb = website ? `https://image.thum.io/get/width/600/${encodeURIComponent(website)}` : '';
+    const serpThumb = serpQuery ? `https://image.thum.io/get/width/600/${encodeURIComponent('https://www.google.com/search?q=' + encodeURIComponent(serpQuery))}` : '';
+
+    const screenshotsHtml = (websiteThumb || serpThumb) ? `
+      <div>
+        <div class="field-label" style="margin-bottom:8px">Screenshots</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${websiteThumb ? `<div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Website — ${website}</div>
+            <img src="${websiteThumb}" style="width:100%;border-radius:6px;border:1px solid var(--border2);display:block" loading="lazy">
+          </div>` : ''}
+          ${serpThumb ? `<div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:4px">SERP — "${serpQuery}"</div>
+            <img src="${serpThumb}" style="width:100%;border-radius:6px;border:1px solid var(--border2);display:block" loading="lazy">
+          </div>` : ''}
+        </div>
+      </div>` : '';
+
     document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
       <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" placeholder="recipient@example.com" style="${ta}" /></div>
       <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
       <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:300px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+      ${screenshotsHtml}
     </div>`;
     document.getElementById('modal-footer').innerHTML = `
       <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
