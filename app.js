@@ -3198,6 +3198,78 @@ async function openEmailCompose(companyId, useCallContext = false) {
   document.getElementById('modal').style.display = 'flex';
 }
 
+async function generateDemoEmail() {
+  const meta = state._demoEmailMeta;
+  if (!meta) return;
+  const { companyId, templateId, contactEmail, firstName } = meta;
+  const c = state.contacts.find(x => x.id === companyId);
+  const senderName = state.user?.name || '[Your Name]';
+  const isFullDemo = templateId === 'full_demo';
+  const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
+
+  const attendees  = document.getElementById('demo-attendees')?.value.trim() || '';
+  const covered    = document.getElementById('demo-covered')?.value.trim() || '';
+  const pkg        = document.getElementById('demo-package')?.value.trim() || '';
+  const clientAsk  = document.getElementById('demo-client-ask')?.value.trim() || '';
+
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Writing email...</div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
+
+  try {
+    const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+      system: `You write post-demo follow-up emails for Olly Olly sales reps. Olly Olly is a digital marketing agency selling to home service contractors. Write like a real person — casual, warm, specific. Never say "the business" — use "you/your/you guys". No buzzwords. No AI phrases.`,
+      messages: [{ role: 'user', content: `Write a ${isFullDemo ? 'post-full-demo' : 'post-partial-demo'} follow-up email.
+
+Company: ${c?.name || ''}
+Rep name: ${senderName}
+Prospect first name: ${firstName || '[First Name]'}
+
+Demo details:
+- Who was present: ${attendees || 'not specified'}
+- What was covered: ${covered || 'not specified'}
+- Package recommended: ${pkg || 'not discussed yet'}
+- What the client asked for / was interested in: ${clientAsk || 'not specified'}
+
+${isFullDemo ? `FULL DEMO email rules:
+- Open with something specific from the call — reference what they asked for or what resonated
+- Address their specific ask directly (if they wanted more leads in certain areas, mention that)
+- Reinforce why the recommended package fits their situation
+- Urgency: competitors are getting those calls right now while they're thinking about it
+- CTA: review the proposal, sign, or schedule a quick Q&A call — keep it soft
+- Do NOT re-explain the whole product. They saw it. Reference it, don't re-pitch it.` : `PARTIAL DEMO email rules:
+- Warm opening — reference what they DID see and acknowledge you didn't finish
+- Create curiosity around what they missed (heat map showing where they're invisible, website gaps, pricing — especially the setup fee waiver)
+- Light ask: 20-30 min to finish what you started
+- Don't oversell — keep it conversational`}
+
+Sign off: "${senderName} / National Account Executive / Olly Olly"
+
+Return ONLY JSON: { "subject": "...", "body": "..." }. Body uses plain \\n line breaks, no markdown.` }],
+      max_tokens: 700,
+    })});
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '';
+    let subject = '', body = '';
+    try { const p = JSON.parse(text.replace(/```json|```/g,'').trim()); subject = p.subject || ''; body = p.body || text; }
+    catch { subject = isFullDemo ? `Great talking today, ${firstName || '[First Name]'}` : `Picking up where we left off, ${firstName || '[First Name]'}`; body = text; }
+
+    state._emailImages = [];
+    document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" value="${contactEmail}" placeholder="recipient@example.com" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:300px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+    </div>`;
+    document.getElementById('modal-footer').innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>
+      <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
+      <button class="btn btn-sm" onclick="openMailto()">↗ Open in Gmail</button>
+      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send</button>`;
+  } catch (e) {
+    document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
+    document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
+  }
+}
+
 async function generateEmailDraft(companyId) {
   const c = state.contacts.find(x => x.id === companyId);
   const displayNotes = state._emailNotes || [];
@@ -3280,61 +3352,45 @@ async function applyEmailTemplate(companyId, templateId) {
       const contactDetail = firstContactId ? await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${firstContactId}?properties=firstname,lastname,email`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})) : {};
       const firstName = contactDetail?.properties?.firstname || '';
       const contactEmail = contactDetail?.properties?.email || '';
-      const senderName = state.user?.name || '[Your Name]';
-      const isFullDemo = templateId === 'full_demo';
 
-      const demoScriptContext = `Olly Olly Demo Flow (what was shown):
-1. Live SERP — showed what homeowners see searching [industry] in [city], where top 3 map pack calls go
-2. GBP Audit — reviewed their profile gaps: reviews cadence, photos, primary category, services, hours, service areas
-3. Platform overview — GBP management (offense/defense/reviews), social media on autopilot, citation cleanup across 40 directories, competitive heat map, website with service+city pages, retargeting ads
-4. Pricing — Growth Essentials $600/mo, Strategic Advantage $750/mo (most common), Elite Expansion $1,400/mo. All start 6-month commitment then month-to-month. $1,500 setup fee waived as first-call incentive.
-5. Key framing used: "Google doesn't rank the best business, it ranks the most visible and consistent one." Revenue gap = calls going to competitors, not because they do better work.`;
+      // Extract demo details from call notes
+      let extracted = { attendees: '', covered: '', package: '' };
+      if (notes) {
+        const extractRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+          system: `Extract specific details from sales call notes. Return only a JSON object, no explanation.`,
+          messages: [{ role: 'user', content: `From these call notes, extract what you can find. Leave a field blank if it's not clearly stated — don't guess.\n\nCall notes:\n${notes}\n\nReturn JSON:\n- "attendees": who was on the call (names/roles, e.g. "John Smith - owner, wife Sarah")\n- "covered": what demo sections were covered (e.g. "live SERP, GBP audit, website review")\n- "package": package recommended and price (e.g. "Strategic Advantage at $750/mo")\n- "clientAsk": what the client specifically asked about or expressed interest in (e.g. "wanted more leads in surrounding neighborhoods, asked about review automation")` }],
+          max_tokens: 200,
+        })});
+        const extractData = await extractRes.json();
+        try { extracted = JSON.parse((extractData.content?.[0]?.text || '{}').replace(/```json|```/g,'').trim()); } catch {}
+      }
 
-      const aiRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-        system: `You write post-demo follow-up emails for Olly Olly sales reps. Olly Olly is an SEO/digital marketing agency selling to home service contractors. Write like a real human — casual, specific, warm. Never say "the business" — use "you/your/you guys". No buzzwords. No AI-sounding phrases.`,
-        messages: [{ role: 'user', content: `Write a ${isFullDemo ? 'post-full-demo' : 'post-partial-demo'} follow-up email.
+      const iLabel = s => s ? `<span style="font-size:10px;color:var(--green);font-weight:600;margin-left:6px">✓ extracted</span>` : `<span style="font-size:10px;color:var(--amber);font-weight:600;margin-left:6px">fill in</span>`;
+      state._demoEmailMeta = { companyId, templateId, contactEmail, firstName };
 
-Company: ${c.name}
-Location: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}
-Rep: ${senderName}
-Prospect first name: ${firstName || '[First Name]'}
-
-${demoScriptContext}
-
-Call notes (most recent first):
-${notes || 'No notes available — write based on a typical demo scenario'}
-
-${isFullDemo ? `FULL DEMO: The rep ran the complete demo from SERP reveal through pricing. Write a follow-up that:
-- Opens with a warm, specific callback to something from the call (pain point, revenue gap, or a moment that resonated)
-- Briefly reinforces the urgency — competitors are getting those calls right now
-- References the package that made sense for them if it's in the notes, or keeps it open
-- Has a soft but clear CTA: review what was discussed, sign, or schedule a quick call to answer questions
-- Closing should feel like a natural next step, not a hard close` : `PARTIAL DEMO: The demo got cut short or ran out of time before finishing. Write a follow-up that:
-- Warmly acknowledges the conversation and what they DID get to see
-- Creates curiosity about what they didn't get to (the heat map, website analysis, and pricing are powerful closers)
-- Makes the ask feel light — offer to pick up where you left off, 20-30 minutes
-- Keep it short — one paragraph of callback, one of tease, one CTA`}
-
-Return ONLY a JSON object with "subject" and "body" fields. The body should use plain line breaks (\\n), no markdown. Sign off with the rep's name and "National Account Executive / Olly Olly".` }],
-        max_tokens: 700,
-      })});
-      const aiData = await aiRes.json();
-      const text = aiData.content?.[0]?.text || '';
-      let subject = '', body = '';
-      try { const p = JSON.parse(text.replace(/```json|```/g,'').trim()); subject = p.subject || ''; body = p.body || text; }
-      catch { subject = isFullDemo ? `Great talking today, ${firstName || '[First Name]'}` : `Picking up where we left off, ${firstName || '[First Name]'}`; body = text; }
-
-      state._emailImages = [];
-      document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
-        <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" value="${contactEmail}" placeholder="recipient@example.com" style="${ta}" /></div>
-        <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
-        <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:300px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
-      </div>`;
+      document.getElementById('modal-body').innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:12px;color:var(--text3)">Verify or fill in any missing details — the email will be written around these.</div>
+          <div>
+            <div class="field-label" style="margin-bottom:4px">Who was present for the demo?${iLabel(extracted.attendees)}</div>
+            <input id="demo-attendees" value="${(extracted.attendees || '').replace(/"/g,'&quot;')}" placeholder="e.g. John Smith (owner), wife Sarah" style="${ta}" />
+          </div>
+          <div>
+            <div class="field-label" style="margin-bottom:4px">What did you go over?${iLabel(extracted.covered)}</div>
+            <textarea id="demo-covered" placeholder="e.g. live SERP, GBP audit, website gaps, pricing" style="${ta};min-height:70px;font-family:inherit;resize:vertical">${(extracted.covered || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+          </div>
+          <div>
+            <div class="field-label" style="margin-bottom:4px">Package recommended + price?${iLabel(extracted.package)}</div>
+            <input id="demo-package" value="${(extracted.package || '').replace(/"/g,'&quot;')}" placeholder="e.g. Strategic Advantage at $750/mo" style="${ta}" />
+          </div>
+          <div>
+            <div class="field-label" style="margin-bottom:4px">What did the client ask for / express interest in?${iLabel(extracted.clientAsk)}</div>
+            <textarea id="demo-client-ask" placeholder="e.g. more leads in surrounding cities, wanted to know if reviews could be automated" style="${ta};min-height:70px;font-family:inherit;resize:vertical">${(extracted.clientAsk || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+          </div>
+        </div>`;
       document.getElementById('modal-footer').innerHTML = `
         <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
-        <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
-        <button class="btn btn-sm" onclick="openMailto()">↗ Open in Gmail</button>
-        <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send</button>`;
+        <button class="btn btn-primary btn-sm" onclick="generateDemoEmail()">Generate Email →</button>`;
     } catch (e) {
       document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
       document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
