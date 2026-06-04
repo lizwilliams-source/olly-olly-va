@@ -3255,32 +3255,17 @@ async function generateDemoEmail() {
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
 
   try {
-    // Case studies — try to find real URLs from sitemap, fall back to base URL
+    // Case studies — use org-configured links if available, else use placeholders rep fills in
     const orgLinks = state.orgSettings?.resourceLinks || [];
-    let caseStudyLinks = {
-      accent: 'https://www.ollyolly.com',
-      forte: 'https://www.ollyolly.com',
-      greenoak: 'https://www.ollyolly.com',
-    };
-    if (!orgLinks.length) {
-      try {
-        const sitemap = await fetch('/api/scrape?action=sitemap&site=https://www.ollyolly.com', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        const urls = sitemap.urls || [];
-        const find = (kw) => urls.find(u => u.toLowerCase().includes(kw)) || null;
-        caseStudyLinks.accent   = find('accent') || find('awning')   || caseStudyLinks.accent;
-        caseStudyLinks.forte    = find('forte')  || find('remodel')  || caseStudyLinks.forte;
-        caseStudyLinks.greenoak = find('green')  || find('roofing')  || caseStudyLinks.greenoak;
-      } catch {}
-    } else {
-      // Use org-configured links
-      caseStudyLinks.accent = caseStudyLinks.forte = caseStudyLinks.greenoak = orgLinks[0] || 'https://www.ollyolly.com';
-    }
+    const csAccent   = orgLinks.find(l => /accent/i.test(l))   || orgLinks[0] || '[paste Accent Awnings link]';
+    const csForte    = orgLinks.find(l => /forte/i.test(l))    || orgLinks[1] || '[paste Forte Builders link]';
+    const csGreenoak = orgLinks.find(l => /green|oak/i.test(l))|| orgLinks[2] || '[paste GreenOak link]';
 
-    const caseStudies = `Available Olly Olly case studies — LINK THEM DIRECTLY in the email body when relevant:
-- Accent Awnings (CA, awning installation): was on page 3, now #1 in San Diego + #2 in Orange County within ~90 days → ${caseStudyLinks.accent}
-- Forte Builders (UT, remodeling/general contractor): built dedicated service + city pages, now top 3 across multiple cities south of Salt Lake → ${caseStudyLinks.forte}
-- GreenOak Exteriors (VA, roofing/home services): went from nearly invisible to top 3 across DC metro → ${caseStudyLinks.greenoak}
-If the client asked for resources/case studies/examples, include the most relevant one with its link in the email. Format: "Here's what we did for [name]: [url]" or similar — natural, not a bullet list.`;
+    const caseStudies = `Available Olly Olly case studies — if client asked for resources, include the most relevant one in the email body with its link. Write it naturally ("Here's one we did with a similar contractor: [link]"), not as a bullet list.
+- Accent Awnings (CA, awning installation): page 3 → #1 San Diego + #2 Orange County in ~90 days | ${csAccent}
+- Forte Builders (UT, remodeling/GC): couldn't rank for specific services → top 3 across multiple cities | ${csForte}
+- GreenOak Exteriors (VA, roofing): nearly invisible → top 3 across DC metro | ${csGreenoak}
+Include whichever fits the prospect's industry. Keep the link in the email body as-is (rep will fill in [paste X link] before sending if needed).`;
 
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
       system: `You write post-demo follow-up emails for Olly Olly sales reps. Match this style EXACTLY:
@@ -3487,7 +3472,24 @@ async function applyEmailTemplate(companyId, templateId) {
         }
       } catch {}
 
-      const allNotesCtx = [sessionTranscript, savedNotes, hsCallBody].filter(Boolean).join('\n---\n');
+      // Also fetch HubSpot engagement notes (where coaching notes + manual notes live)
+      let hsNoteBody = '';
+      try {
+        const noteAssocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/notes?limit=20`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+        const noteIds = (noteAssocRes.results || []).map(r => r.id);
+        if (noteIds.length) {
+          const noteBatchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/notes/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: noteIds.slice(0, 10).map(id => ({ id })), properties: ['hs_note_body', 'hs_timestamp'] }) }).then(r => r.json());
+          hsNoteBody = (noteBatchRes.results || [])
+            .filter(n => n.properties.hs_note_body)
+            .sort((a, b) => (b.properties.hs_timestamp || 0) - (a.properties.hs_timestamp || 0))
+            .slice(0, 5)
+            .map(n => `[HubSpot note · ${new Date(+n.properties.hs_timestamp).toLocaleDateString()}]\n${n.properties.hs_note_body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}`)
+            .join('\n---\n');
+        }
+      } catch {}
+
+      const allNotesCtx = [sessionTranscript, savedNotes, hsNoteBody, hsCallBody].filter(Boolean).join('\n---\n');
+      const debugInfo = `KV notes: ${(state.notes?.[companyId] || []).length} | HubSpot notes: ${hsNoteBody ? hsNoteBody.split('---').length : 0} | Transcript: ${sessionTranscript ? 'yes' : 'no'}`;
 
       // Extract demo details from call notes
       let extracted = { attendees: '', covered: '', package: '', clientAsk: '' };
@@ -3506,7 +3508,8 @@ async function applyEmailTemplate(companyId, templateId) {
 
       document.getElementById('modal-body').innerHTML = `
         <div style="display:flex;flex-direction:column;gap:14px">
-          <div style="font-size:12px;color:var(--text3)">${hasExtracted ? 'Pulled from call — verify and fill in anything missing.' : 'Fill in what you remember from the call.'}</div>
+          <div style="font-size:12px;color:var(--text3)">${hasExtracted ? 'Pulled from call — verify and fill in anything missing.' : 'Nothing found to extract — fill in manually.'}</div>
+          <div style="font-size:10px;color:var(--text3);background:var(--bg3);padding:4px 8px;border-radius:4px;font-family:monospace">${debugInfo}</div>
           <div>
             <div class="field-label" style="margin-bottom:4px">Who was present?</div>
             <input id="demo-attendees" value="${(extracted.attendees || '').replace(/"/g,'&quot;')}" placeholder="e.g. John (owner), wife Sarah" style="${ta}" />
