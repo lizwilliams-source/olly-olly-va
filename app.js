@@ -104,7 +104,6 @@ function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'grid';
   document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
-  if (state.isAdmin) document.getElementById('admin-nav').style.display = 'flex';
   document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => showView(item.dataset.view)); });
   document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal') && !state.transcribing) closeModal(); });
   init();
@@ -1291,6 +1290,7 @@ async function loadUsageDashboard(month) {
 }
 
 async function renderAdmin() {
+  showView('settings'); return;
   if (!state.isAdmin) { showView('dashboard'); return; }
   const currentMonth = new Date().toISOString().slice(0, 7);
   document.getElementById('main').innerHTML = `
@@ -2469,6 +2469,38 @@ async function renderSettingsView() {
           </div>
         </div>
 
+        ${state.isAdmin ? `<div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">👥 Team Members</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Add and manage reps.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+            <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
+              <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Add one person</div>
+              <div style="margin-bottom:8px"><div class="field-label" style="margin-bottom:4px">Full name</div><input id="new-name" placeholder="Jane Smith" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" oninput="autoFillUser()" /></div>
+              <div style="margin-bottom:8px"><div class="field-label" style="margin-bottom:4px">Email</div><input id="new-email" placeholder="Auto-filled from name" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" /></div>
+              <div style="margin-bottom:12px"><div class="field-label" style="margin-bottom:4px">Password</div><input id="new-password" style="width:100%;background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" value="OllyOlly2025!" /></div>
+              <div style="margin-bottom:12px"><label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" id="new-admin" /> Make admin</label></div>
+              <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="addUser()">Add user</button>
+              <div id="add-msg" style="font-size:12px;margin-top:8px"></div>
+            </div>
+            <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
+              <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Bulk add</div>
+              <div style="font-size:11px;color:var(--text3);margin-bottom:10px">One full name per line. Email and password auto-generated.</div>
+              <textarea id="bulk-names" placeholder="Jane Smith&#10;John Doe&#10;Sarah Connor" style="width:100%;height:140px;background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;resize:none;font-family:inherit"></textarea>
+              <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="bulkAddUsers()">Add all</button>
+              <div id="bulk-msg" style="font-size:12px;margin-top:8px;line-height:1.6"></div>
+            </div>
+          </div>
+          <div id="user-list"><span class="spinner"></span> Loading...</div>
+        </div>
+
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Usage & API Cost</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;display:flex;align-items:center;gap:10px">
+            Month: <input type="month" id="usage-month" value="${new Date().toISOString().slice(0,7)}" onchange="loadUsageDashboard(this.value)" style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:5px 10px;color:var(--text);font-size:12px;outline:none" />
+          </div>
+          <div id="usage-table"><span class="spinner"></span> Loading...</div>
+        </div>` : ''}
+
         <div>
           <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔑 Change Password</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Update your login password.</div>
@@ -2492,6 +2524,11 @@ async function renderSettingsView() {
 
       </div>
     </div>`;
+
+  if (state.isAdmin) {
+    loadUserList();
+    loadUsageDashboard(new Date().toISOString().slice(0, 7));
+  }
 
   // Load calendars
   try {
