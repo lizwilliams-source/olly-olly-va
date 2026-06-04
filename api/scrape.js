@@ -5,19 +5,54 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
-  // ── SITEMAP FETCH ──────────────────────────────────────────────────────────
-  if (req.query.action === 'sitemap') {
+  // ── OO RESOURCE LINK FINDER ───────────────────────────────────────────────
+  if (req.query.action === 'oo-resources') {
+    const base = 'https://www.ollyolly.com';
+    const headers = { 'User-Agent': 'Mozilla/5.0 (compatible; OllyOllyBot/1.0)' };
+    const sig = AbortSignal.timeout(8000);
+    const allUrls = new Set();
+
+    const extractLinks = (text, base) => {
+      const fromHref = [...text.matchAll(/href=["']([^"'#]+)["']/g)].map(m => m[1]);
+      const fromLoc  = [...text.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+      return [...fromHref, ...fromLoc]
+        .map(u => u.startsWith('http') ? u : u.startsWith('/') ? base + u : null)
+        .filter(u => u && u.includes('ollyolly.com'));
+    };
+
+    // Try sitemaps
+    const sitemapPaths = ['/sitemap.xml', '/sitemap_index.xml', '/sitemap-0.xml', '/server-sitemap.xml', '/page-sitemap.xml'];
+    await Promise.allSettled(sitemapPaths.map(async path => {
+      try {
+        const text = await fetch(base + path, { headers, signal: sig }).then(r => r.ok ? r.text() : '');
+        extractLinks(text, base).forEach(u => allUrls.add(u));
+      } catch {}
+    }));
+
+    // Try case study / results pages directly
+    const pagePaths = ['/case-studies', '/results', '/client-stories', '/work', '/success-stories', '/clients'];
+    await Promise.allSettled(pagePaths.map(async path => {
+      try {
+        const text = await fetch(base + path, { headers, signal: sig }).then(r => r.ok ? r.text() : '');
+        extractLinks(text, base).forEach(u => allUrls.add(u));
+      } catch {}
+    }));
+
+    // Try homepage too
     try {
-      const base = req.query.site || 'https://www.ollyolly.com';
-      const xml = await fetch(`${base}/sitemap.xml`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OllyOllyBot/1.0)' },
-        signal: AbortSignal.timeout(6000),
-      }).then(r => r.text());
-      const urls = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
-      return res.status(200).json({ urls });
-    } catch (e) {
-      return res.status(200).json({ urls: [], error: e.message });
-    }
+      const text = await fetch(base, { headers, signal: sig }).then(r => r.text());
+      extractLinks(text, base).forEach(u => allUrls.add(u));
+    } catch {}
+
+    // Filter to likely case study / resource URLs
+    const keywords = /accent|forte|greenoak|green-oak|case-stud|result|client|success|stor|work|blog|resource/i;
+    const resourceUrls = [...allUrls].filter(u => keywords.test(u));
+    const allOO = [...allUrls].filter(u => !u.includes('/_next') && !u.includes('/api/'));
+
+    return res.status(200).json({
+      resourceUrls,
+      allUrls: allOO.slice(0, 60),
+    });
   }
 
   const { website, name, city, state } = req.query;

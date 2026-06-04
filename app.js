@@ -3255,11 +3255,31 @@ async function generateDemoEmail() {
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
 
   try {
-    // Case studies — use org-configured links if available, else use placeholders rep fills in
+    // Case studies — try org links first, then auto-discover from ollyolly.com
     const orgLinks = state.orgSettings?.resourceLinks || [];
-    const csAccent   = orgLinks.find(l => /accent/i.test(l))   || orgLinks[0] || '[paste Accent Awnings link]';
-    const csForte    = orgLinks.find(l => /forte/i.test(l))    || orgLinks[1] || '[paste Forte Builders link]';
-    const csGreenoak = orgLinks.find(l => /green|oak/i.test(l))|| orgLinks[2] || '[paste GreenOak link]';
+    let csAccent   = orgLinks.find(l => /accent/i.test(l))    || '';
+    let csForte    = orgLinks.find(l => /forte/i.test(l))     || '';
+    let csGreenoak = orgLinks.find(l => /green|oak/i.test(l)) || '';
+
+    if (!csAccent || !csForte || !csGreenoak) {
+      try {
+        const ooRes = await fetch('/api/scrape?action=oo-resources', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+        const urls = [...(ooRes.resourceUrls || []), ...(ooRes.allUrls || [])];
+        const find = (...kws) => urls.find(u => kws.some(kw => u.toLowerCase().includes(kw))) || '';
+        if (!csAccent)   csAccent   = find('accent', 'awning');
+        if (!csForte)    csForte    = find('forte', 'remodel');
+        if (!csGreenoak) csGreenoak = find('greenoak', 'green-oak', 'roofing');
+        // Generic fallback: find any case study / results page
+        const fallback = find('case-stud', 'result', 'client-stor', 'success');
+        if (!csAccent)   csAccent   = fallback || 'https://www.ollyolly.com';
+        if (!csForte)    csForte    = fallback || 'https://www.ollyolly.com';
+        if (!csGreenoak) csGreenoak = fallback || 'https://www.ollyolly.com';
+      } catch {
+        csAccent   = csAccent   || 'https://www.ollyolly.com';
+        csForte    = csForte    || 'https://www.ollyolly.com';
+        csGreenoak = csGreenoak || 'https://www.ollyolly.com';
+      }
+    }
 
     const caseStudies = `Available Olly Olly case studies — if client asked for resources, include the most relevant one in the email body with its link. Write it naturally ("Here's one we did with a similar contractor: [link]"), not as a bullet list.
 - Accent Awnings (CA, awning installation): page 3 → #1 San Diego + #2 Orange County in ~90 days | ${csAccent}
