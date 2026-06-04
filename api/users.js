@@ -415,5 +415,22 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  if (action === 'getorgsettings') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const settings = await kvGet('org:settings') || {};
+    return res.status(200).json({ settings });
+  }
+
+  if (action === 'setorgsettings') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session?.isAdmin) return res.status(403).json({ error: 'Admin only' });
+    const existing = await kvGet('org:settings') || {};
+    await kvSet('org:settings', { ...existing, ...req.body });
+    return res.status(200).json({ ok: true });
+  }
+
 return res.status(400).json({ error: 'Unknown action' });
 }

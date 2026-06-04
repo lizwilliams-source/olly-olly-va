@@ -20,6 +20,7 @@ const state = {
   demoAcks: {},
   calendarDateOffset: 0,
   eventHsCache: {},
+  orgSettings: {},
   contactsPage: 0,
   contactsTotal: 0,
   contactsPageSize: 50,
@@ -1524,7 +1525,7 @@ let refreshInterval = null;
 
 async function init() {
   showView('dashboard');
-  await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels(), loadDemoTags()]);
+  await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels(), loadDemoTags(), loadOrgSettings()]);
   if (state.currentView === 'dashboard') showView('dashboard');
   loadDailyBriefing();
   startAutoRefresh();
@@ -2470,6 +2471,13 @@ async function renderSettingsView() {
         </div>
 
         ${state.isAdmin ? `<div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔗 Company Resource Links</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Links to case studies, blog posts, or resources that reps can include in demo follow-up emails when a prospect asks for them. One URL per line — optionally add a label like "Case Study: Accent Awnings | https://..."</div>
+          <textarea id="org-resources" style="width:100%;min-height:120px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px 12px;color:var(--text);font-size:13px;outline:none;font-family:inherit;resize:vertical" placeholder="Case Study: Accent Awnings | https://ollyolly.com/case-studies/accent-awnings&#10;Blog: Why GBP Matters | https://ollyolly.com/blog/gbp&#10;https://ollyolly.com/resources">${(state.orgSettings?.resourceLinks || []).join('\n').replace(/</g,'&lt;')}</textarea>
+          <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="saveOrgResources()">Save resource links</button>
+        </div>
+
+        <div>
           <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">👥 Team Members</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Add and manage reps.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -2556,6 +2564,16 @@ async function renderSettingsView() {
     const sec = document.getElementById('cal-prefs-section');
     if (sec) sec.innerHTML = `<div style="font-size:13px;color:var(--text3)">Could not load calendars. <button class="btn btn-sm" onclick="connectGoogleCalendar()">Reconnect Google</button></div>`;
   }
+}
+
+async function saveOrgResources() {
+  const raw = document.getElementById('org-resources')?.value || '';
+  const resourceLinks = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  try {
+    await fetch('/api/users?action=setorgsettings', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ resourceLinks }) });
+    state.orgSettings.resourceLinks = resourceLinks;
+    toast('Resource links saved ✓', 'success');
+  } catch { toast('Failed to save', 'error'); }
 }
 
 async function saveCalendarPrefs() {
@@ -2654,6 +2672,15 @@ async function resolveEventCompanies(events) {
       if (match) state.eventHsCache[ev.id] = map[match];
     }
     renderScheduleSection();
+  } catch {}
+}
+
+async function loadOrgSettings() {
+  try {
+    const res = await fetch('/api/users?action=getorgsettings', { headers: { Authorization: `Bearer ${state.token}` } });
+    if (!res.ok) return;
+    const { settings } = await res.json();
+    state.orgSettings = settings || {};
   } catch {}
 }
 
@@ -3216,15 +3243,11 @@ async function generateDemoEmail() {
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
 
   try {
-    // Fetch Olly Olly website resources if client asked for them
+    // Include configured resource links if client asked for them
     let resourceLinks = '';
-    if (/resource|case stud|example|blog|website|article|guide/i.test(clientAsk)) {
-      try {
-        const ooScrape = await fetch('/api/scrape?website=https://www.ollyolly.com&links=1', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        if (ooScrape.links?.length) {
-          resourceLinks = `\n\nOlly Olly website links (pick the most relevant to include):\n${ooScrape.links.slice(0, 20).join('\n')}`;
-        }
-      } catch {}
+    if (/resource|case stud|example|blog|website|article|guide|link|send/i.test(clientAsk)) {
+      const links = state.orgSettings?.resourceLinks || [];
+      if (links.length) resourceLinks = `\n\nOlly Olly resources to include (pick the most relevant 1-2):\n${links.join('\n')}`;
     }
 
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
@@ -3366,9 +3389,26 @@ async function applyEmailTemplate(companyId, templateId) {
       const firstName = contactDetail?.properties?.firstname || '';
       const contactEmail = contactDetail?.properties?.email || '';
 
-      // Build notes context — include state.lastCallContext even if not saved as a note
+      // Build notes context: KV notes + lastCallContext + HubSpot call bodies
       const savedNotes = (state.notes?.[companyId] || []).slice(0, 10).map(n => `[${n.date}${n.type ? ' · ' + n.type : ''}]\n${n.text}`).join('\n---\n');
-      const allNotesCtx = [savedNotes, state.lastCallContext ? `[Most recent call analysis]\n${state.lastCallContext}` : ''].filter(Boolean).join('\n---\n');
+
+      // Fetch HubSpot call notes for this company
+      let hsCallNotes = '';
+      try {
+        const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/calls`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+        const callIds = (assocRes.results || []).slice(0, 10).map(c => c.id);
+        if (callIds.length) {
+          const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: callIds.map(id => ({ id })), properties: ['hs_call_body', 'hs_timestamp', 'hs_call_duration'] }) }).then(r => r.json());
+          hsCallNotes = (batchRes.results || [])
+            .filter(c => c.properties.hs_call_body)
+            .sort((a, b) => (b.properties.hs_timestamp || 0) - (a.properties.hs_timestamp || 0))
+            .slice(0, 5)
+            .map(c => `[HubSpot call · ${new Date(+c.properties.hs_timestamp).toLocaleDateString()}]\n${c.properties.hs_call_body}`)
+            .join('\n---\n');
+        }
+      } catch {}
+
+      const allNotesCtx = [savedNotes, hsCallNotes, state.lastCallContext ? `[Most recent call analysis]\n${state.lastCallContext}` : ''].filter(Boolean).join('\n---\n');
 
       // Extract demo details from call notes
       let extracted = { attendees: '', covered: '', package: '', clientAsk: '' };
