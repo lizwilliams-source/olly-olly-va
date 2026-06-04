@@ -2798,12 +2798,12 @@ async function renderDialerView() {
       </div>
       <div class="topbar-right" style="gap:6px">
         <button id="perm-mic" class="btn btn-sm" onclick="requestDialerPermissions()" style="font-size:12px">🎤 Mic</button>
-        <a href="https://app.aloware.com" target="_blank" class="btn btn-sm" style="font-size:12px;text-decoration:none">↗ New tab</a>
+        <a href="https://app.aloware.io" target="_blank" class="btn btn-sm" style="font-size:12px;text-decoration:none">↗ New tab</a>
       </div>
     </div>
     <div style="display:flex;height:calc(100vh - 61px)">
       <div style="flex:1;position:relative;min-width:0">
-        <iframe id="aloware-frame" src="https://app.aloware.com" style="width:100%;height:100%;border:none;display:block" allow="microphone *; camera *; notifications *; autoplay *; clipboard-write *"></iframe>
+        <iframe id="aloware-frame" src="https://app.aloware.io" style="width:100%;height:100%;border:none;display:block" allow="microphone *; camera *; notifications *; autoplay *; clipboard-write *"></iframe>
         <div id="dialer-demo-overlay" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(15,0,0,0.6);backdrop-filter:blur(2px);z-index:10;flex-direction:column;align-items:center;justify-content:center;gap:16px">
           <div style="font-size:52px">⏰</div>
           <div id="dialer-overlay-msg" style="font-size:16px;font-weight:700;color:#fff;text-align:center"></div>
