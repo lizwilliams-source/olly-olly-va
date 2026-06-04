@@ -3523,6 +3523,11 @@ async function applyEmailTemplate(companyId, templateId) {
         try { extracted = JSON.parse((extractData.content?.[0]?.text || '{}').replace(/```json|```/g,'').trim()); } catch {}
       }
 
+      const toStr = v => Array.isArray(v) ? v.join(', ') : (v ? String(v) : '');
+      extracted.attendees  = toStr(extracted.attendees);
+      extracted.covered    = toStr(extracted.covered);
+      extracted.package    = toStr(extracted.package);
+      extracted.clientAsk  = toStr(extracted.clientAsk);
       const hasExtracted = extracted.attendees || extracted.covered || extracted.package || extracted.clientAsk;
       state._demoEmailMeta = { companyId, templateId, contactEmail, firstName, callDate: mostRecentCallDate };
 
