@@ -1935,6 +1935,17 @@ async function handleAudioUpload(companyId) {
 }
 
 function showCallAnalysis(companyId, transcript, analysis) {
+  // Store transcript + analysis for email template use
+  state.lastCallContext = `TRANSCRIPT:\n${transcript}\n\nANALYSIS SUMMARY:\n${analysis.summary || ''}\nInterested: ${analysis.interested}\nSentiment: ${analysis.sentiment || ''}${analysis.followUpCommitment ? '\nFollow-up: ' + analysis.followUpCommitment : ''}`;
+  state.lastCallCompanyId = companyId;
+  state.lastCallDate = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+  // Auto-save to KV so it persists across sessions
+  fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text: state.lastCallContext, date: new Date().toLocaleString(), type: 'call_transcript' }) }).catch(() => {});
+  if (!state.notes) state.notes = {};
+  if (!state.notes[companyId]) state.notes[companyId] = [];
+  if (!state.notes[companyId].find(n => n.type === 'call_transcript' && n.date === new Date().toLocaleString()))
+    state.notes[companyId].unshift({ text: state.lastCallContext, date: new Date().toLocaleString(), type: 'call_transcript' });
+
   const c = state.contacts.find(x => x.id === companyId);
   const followUpDate = analysis.followUpDate ? new Date(analysis.followUpDate) : null;
   const followUpDateStr = followUpDate ? followUpDate.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' }) : null;
@@ -3228,7 +3239,7 @@ async function openEmailCompose(companyId, useCallContext = false) {
 async function generateDemoEmail() {
   const meta = state._demoEmailMeta;
   if (!meta) return;
-  const { companyId, templateId, contactEmail, firstName } = meta;
+  const { companyId, templateId, contactEmail, firstName, callDate } = meta;
   const c = state.contacts.find(x => x.id === companyId);
   const senderName = state.user?.name || '[Your Name]';
   const isFullDemo = templateId === 'full_demo';
@@ -3243,11 +3254,19 @@ async function generateDemoEmail() {
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
 
   try {
-    // Include configured resource links if client asked for them
+    const docSent = document.getElementById('demo-doc-sent')?.value.trim() || '';
+
+    // Build resource context from org settings + demo script case studies
     let resourceLinks = '';
-    if (/resource|case stud|example|blog|website|article|guide|link|send/i.test(clientAsk)) {
-      const links = state.orgSettings?.resourceLinks || [];
-      if (links.length) resourceLinks = `\n\nOlly Olly resources to include (pick the most relevant 1-2):\n${links.join('\n')}`;
+    if (/resource|case stud|example|blog|website|article|guide|link|send/i.test(clientAsk + ' ' + docSent)) {
+      const orgLinks = state.orgSettings?.resourceLinks || [];
+      const scriptResources = [
+        'Case Study: Accent Awnings (CA) — ranked #1 San Diego, #2 Orange County for "Awning Installation" | https://www.ollyolly.com',
+        'Case Study: Forte Builders (UT) — remodeling/general contractor, now ranking top 3 across multiple cities | https://www.ollyolly.com',
+        'Case Study: GreenOak Exteriors (VA) — roofing/home services, went from invisible to top 3 in DC metro | https://www.ollyolly.com',
+      ];
+      const allResources = [...orgLinks, ...(orgLinks.length ? [] : scriptResources)];
+      if (allResources.length) resourceLinks = `\n\nOlly Olly resources (include the most relevant 1-2 for this prospect's industry):\n${allResources.join('\n')}`;
     }
 
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
@@ -3257,12 +3276,16 @@ async function generateDemoEmail() {
 Company: ${c?.name || ''}
 Rep name: ${senderName}
 Prospect first name: ${firstName || '[First Name]'}
+Demo date: ${callDate || 'recent'}
 
 Demo details:
 - Who was present: ${attendees || 'not specified'}
 - What was covered: ${covered || 'not specified'}
 - Package recommended: ${pkg || 'not discussed yet'}
-- What the client asked for / was interested in: ${clientAsk || 'not specified'}${resourceLinks}
+- What the client asked for / was interested in: ${clientAsk || 'not specified'}
+- Document sent: ${docSent || 'none'}${resourceLinks}
+
+IMPORTANT: Use the actual demo date above when referencing the call (e.g. "Great talking on Monday" not "Great talking yesterday"). Do not assume it was yesterday.
 
 ${isFullDemo ? `FULL DEMO email rules:
 - Open with something specific from the call — reference what they asked for or what resonated
@@ -3389,26 +3412,38 @@ async function applyEmailTemplate(companyId, templateId) {
       const firstName = contactDetail?.properties?.firstname || '';
       const contactEmail = contactDetail?.properties?.email || '';
 
-      // Build notes context: KV notes + lastCallContext + HubSpot call bodies
-      const savedNotes = (state.notes?.[companyId] || []).slice(0, 10).map(n => `[${n.date}${n.type ? ' · ' + n.type : ''}]\n${n.text}`).join('\n---\n');
+      // Build notes context — prioritize transcripts over call body notes
+      const allNotes = (state.notes?.[companyId] || []).slice(0, 15);
+      const transcriptNotes = allNotes.filter(n => n.type === 'call_transcript' || n.type === 'call_analysis');
+      const otherNotes = allNotes.filter(n => n.type !== 'call_transcript' && n.type !== 'call_analysis');
+      const savedNotes = [
+        ...transcriptNotes.map(n => `[${n.date} · TRANSCRIPT]\n${n.text}`),
+        ...otherNotes.map(n => `[${n.date}${n.type ? ' · ' + n.type : ''}]\n${n.text}`),
+      ].join('\n---\n');
 
-      // Fetch HubSpot call notes for this company
-      let hsCallNotes = '';
+      // If this is the company from the last analyzed call, use that transcript
+      const sessionTranscript = (state.lastCallCompanyId === companyId && state.lastCallContext)
+        ? `[Current session transcript]\n${state.lastCallContext}` : '';
+
+      // Get the most recent call date from HubSpot for accurate date reference
+      let mostRecentCallDate = state.lastCallDate || '';
+      let hsCallBody = '';
       try {
         const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/calls`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        const callIds = (assocRes.results || []).slice(0, 10).map(c => c.id);
+        const callIds = (assocRes.results || []).slice(0, 5).map(r => r.id);
         if (callIds.length) {
-          const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: callIds.map(id => ({ id })), properties: ['hs_call_body', 'hs_timestamp', 'hs_call_duration'] }) }).then(r => r.json());
-          hsCallNotes = (batchRes.results || [])
-            .filter(c => c.properties.hs_call_body)
-            .sort((a, b) => (b.properties.hs_timestamp || 0) - (a.properties.hs_timestamp || 0))
-            .slice(0, 5)
-            .map(c => `[HubSpot call · ${new Date(+c.properties.hs_timestamp).toLocaleDateString()}]\n${c.properties.hs_call_body}`)
+          const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: callIds.map(id => ({ id })), properties: ['hs_call_body', 'hs_timestamp'] }) }).then(r => r.json());
+          const sorted = (batchRes.results || []).sort((a, b) => (b.properties.hs_timestamp || 0) - (a.properties.hs_timestamp || 0));
+          if (sorted[0]?.properties.hs_timestamp && !mostRecentCallDate) {
+            mostRecentCallDate = new Date(+sorted[0].properties.hs_timestamp).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+          }
+          hsCallBody = sorted.filter(c => c.properties.hs_call_body).slice(0, 3)
+            .map(c => `[HubSpot call note · ${new Date(+c.properties.hs_timestamp).toLocaleDateString()}]\n${c.properties.hs_call_body}`)
             .join('\n---\n');
         }
       } catch {}
 
-      const allNotesCtx = [savedNotes, hsCallNotes, state.lastCallContext ? `[Most recent call analysis]\n${state.lastCallContext}` : ''].filter(Boolean).join('\n---\n');
+      const allNotesCtx = [sessionTranscript, savedNotes, hsCallBody].filter(Boolean).join('\n---\n');
 
       // Extract demo details from call notes
       let extracted = { attendees: '', covered: '', package: '', clientAsk: '' };
@@ -3423,7 +3458,7 @@ async function applyEmailTemplate(companyId, templateId) {
       }
 
       const iLabel = s => s ? `<span style="font-size:10px;color:var(--green);font-weight:600;margin-left:6px">✓ extracted</span>` : `<span style="font-size:10px;color:var(--amber);font-weight:600;margin-left:6px">fill in</span>`;
-      state._demoEmailMeta = { companyId, templateId, contactEmail, firstName };
+      state._demoEmailMeta = { companyId, templateId, contactEmail, firstName, callDate: mostRecentCallDate };
 
       document.getElementById('modal-body').innerHTML = `
         <div style="display:flex;flex-direction:column;gap:14px">
@@ -3443,6 +3478,10 @@ async function applyEmailTemplate(companyId, templateId) {
           <div>
             <div class="field-label" style="margin-bottom:4px">What did the client ask for / express interest in?${iLabel(extracted.clientAsk)}</div>
             <textarea id="demo-client-ask" placeholder="e.g. more leads in surrounding cities, wanted to know if reviews could be automated" style="${ta};min-height:70px;font-family:inherit;resize:vertical">${(extracted.clientAsk || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+          </div>
+          <div>
+            <div class="field-label" style="margin-bottom:4px">Was a document sent? If so, what?</div>
+            <input id="demo-doc-sent" value="" placeholder="e.g. PandaDoc proposal, pricing one-pager (leave blank if nothing sent)" style="${ta}" />
           </div>
         </div>`;
       document.getElementById('modal-footer').innerHTML = `
