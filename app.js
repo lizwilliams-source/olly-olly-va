@@ -3429,10 +3429,10 @@ async function applyEmailTemplate(companyId, templateId) {
       let mostRecentCallDate = state.lastCallDate || '';
       let hsCallBody = '';
       try {
-        const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/calls`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        const callIds = (assocRes.results || []).slice(0, 5).map(r => r.id);
+        const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/calls?limit=50`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+        const callIds = (assocRes.results || []).map(r => r.id);
         if (callIds.length) {
-          const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: callIds.map(id => ({ id })), properties: ['hs_call_body', 'hs_timestamp'] }) }).then(r => r.json());
+          const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: callIds.slice(0, 25).map(id => ({ id })), properties: ['hs_call_body', 'hs_timestamp'] }) }).then(r => r.json());
           const sorted = (batchRes.results || []).sort((a, b) => (b.properties.hs_timestamp || 0) - (a.properties.hs_timestamp || 0));
           if (sorted[0]?.properties.hs_timestamp && !mostRecentCallDate) {
             mostRecentCallDate = new Date(+sorted[0].properties.hs_timestamp).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
