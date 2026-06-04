@@ -3255,12 +3255,32 @@ async function generateDemoEmail() {
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
 
   try {
-    // Case studies from demo script — always available
-    const caseStudies = `Available Olly Olly case studies to reference if relevant:
-- Accent Awnings (CA, awning installation): was on page 3, now #1 in San Diego + #2 in Orange County for "Awning Installation" within ~90 days
-- Forte Builders (UT, remodeling/general contractor): Google didn't know what they specialized in — built dedicated service pages, now top 3 across multiple cities south of Salt Lake City
-- GreenOak Exteriors (VA, roofing/home services): went from nearly invisible online to top 3 across the DC metro for roofing searches
-If client asked for info/resources, weave in the most industry-relevant case study naturally. No need for a direct link — rep can follow up with the full story.`;
+    // Case studies — try to find real URLs from sitemap, fall back to base URL
+    const orgLinks = state.orgSettings?.resourceLinks || [];
+    let caseStudyLinks = {
+      accent: 'https://www.ollyolly.com',
+      forte: 'https://www.ollyolly.com',
+      greenoak: 'https://www.ollyolly.com',
+    };
+    if (!orgLinks.length) {
+      try {
+        const sitemap = await fetch('/api/scrape?action=sitemap&site=https://www.ollyolly.com', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+        const urls = sitemap.urls || [];
+        const find = (kw) => urls.find(u => u.toLowerCase().includes(kw)) || null;
+        caseStudyLinks.accent   = find('accent') || find('awning')   || caseStudyLinks.accent;
+        caseStudyLinks.forte    = find('forte')  || find('remodel')  || caseStudyLinks.forte;
+        caseStudyLinks.greenoak = find('green')  || find('roofing')  || caseStudyLinks.greenoak;
+      } catch {}
+    } else {
+      // Use org-configured links
+      caseStudyLinks.accent = caseStudyLinks.forte = caseStudyLinks.greenoak = orgLinks[0] || 'https://www.ollyolly.com';
+    }
+
+    const caseStudies = `Available Olly Olly case studies — LINK THEM DIRECTLY in the email body when relevant:
+- Accent Awnings (CA, awning installation): was on page 3, now #1 in San Diego + #2 in Orange County within ~90 days → ${caseStudyLinks.accent}
+- Forte Builders (UT, remodeling/general contractor): built dedicated service + city pages, now top 3 across multiple cities south of Salt Lake → ${caseStudyLinks.forte}
+- GreenOak Exteriors (VA, roofing/home services): went from nearly invisible to top 3 across DC metro → ${caseStudyLinks.greenoak}
+If the client asked for resources/case studies/examples, include the most relevant one with its link in the email. Format: "Here's what we did for [name]: [url]" or similar — natural, not a bullet list.`;
 
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
       system: `You write post-demo follow-up emails for Olly Olly sales reps. Match this style EXACTLY:
@@ -3421,6 +3441,12 @@ async function applyEmailTemplate(companyId, templateId) {
   // ── DEMO FOLLOW-UP TEMPLATES ────────────────────────────────────────────────
   if (templateId === 'full_demo' || templateId === 'partial_demo') {
     try {
+      // Always re-fetch notes fresh for demo templates — don't use stale cache
+      try {
+        const nr = await fetch(`/api/users?action=getnotes&companyId=${companyId}`, { headers: { Authorization: `Bearer ${state.token}` } });
+        if (nr.ok) { const { notes: kv } = await nr.json(); if (!state.notes) state.notes = {}; state.notes[companyId] = kv || []; }
+      } catch {}
+
       const contactIds = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({}));
       const firstContactId = (contactIds.results || [])[0]?.id;
       const contactDetail = firstContactId ? await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${firstContactId}?properties=firstname,lastname,email`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})) : {};

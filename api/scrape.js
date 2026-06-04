@@ -5,6 +5,21 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
+  // ── SITEMAP FETCH ──────────────────────────────────────────────────────────
+  if (req.query.action === 'sitemap') {
+    try {
+      const base = req.query.site || 'https://www.ollyolly.com';
+      const xml = await fetch(`${base}/sitemap.xml`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OllyOllyBot/1.0)' },
+        signal: AbortSignal.timeout(6000),
+      }).then(r => r.text());
+      const urls = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1].trim());
+      return res.status(200).json({ urls });
+    } catch (e) {
+      return res.status(200).json({ urls: [], error: e.message });
+    }
+  }
+
   const { website, name, city, state } = req.query;
   const out = { schemaType: '', title: '', description: '', h1: '', gbpCategory: '', gbpRating: null, gbpReviews: null, gbpWebsite: '', gbpFound: false };
 
