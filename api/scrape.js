@@ -29,6 +29,17 @@ export default async function handler(req, res) {
         const skip = new Set(['WebPage','WebSite','Organization','LocalBusiness','BreadcrumbList','ItemList','SiteLinksSearchBox','SearchAction']);
         const types = [...html.matchAll(/"@type"\s*:\s*"([^"]+)"/g)].map(m => m[1]).filter(t => !skip.has(t));
         out.schemaType = types[0] || '';
+
+        // Extract links if requested (for resource lookups)
+        if (req.query.links === '1') {
+          const base = url.replace(/\/$/, '');
+          const seen = new Set();
+          out.links = [...html.matchAll(/href=["']([^"'#?]+)["']/g)]
+            .map(m => m[1].startsWith('http') ? m[1] : m[1].startsWith('/') ? base + m[1] : null)
+            .filter(l => l && !seen.has(l) && seen.add(l))
+            .filter(l => l.includes(new URL(base).hostname))
+            .slice(0, 40);
+        }
       } catch {}
     })() : Promise.resolve(),
 

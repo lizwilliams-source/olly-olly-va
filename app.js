@@ -3216,8 +3216,19 @@ async function generateDemoEmail() {
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
 
   try {
+    // Fetch Olly Olly website resources if client asked for them
+    let resourceLinks = '';
+    if (/resource|case stud|example|blog|website|article|guide/i.test(clientAsk)) {
+      try {
+        const ooScrape = await fetch('/api/scrape?website=https://www.ollyolly.com&links=1', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+        if (ooScrape.links?.length) {
+          resourceLinks = `\n\nOlly Olly website links (pick the most relevant to include):\n${ooScrape.links.slice(0, 20).join('\n')}`;
+        }
+      } catch {}
+    }
+
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-      system: `You write post-demo follow-up emails for Olly Olly sales reps. Olly Olly is a digital marketing agency selling to home service contractors. Write like a real person — casual, warm, specific. Never say "the business" — use "you/your/you guys". No buzzwords. No AI phrases.`,
+      system: `You write post-demo follow-up emails for Olly Olly sales reps. Olly Olly is a digital marketing agency selling to home service contractors. Write like a real person — casual, warm, specific. Never say "the business" — use "you/your/you guys". No buzzwords. No AI phrases. NEVER mention that Olly Olly works with other businesses in the prospect's area or city unless the rep explicitly provided that information.`,
       messages: [{ role: 'user', content: `Write a ${isFullDemo ? 'post-full-demo' : 'post-partial-demo'} follow-up email.
 
 Company: ${c?.name || ''}
@@ -3228,17 +3239,19 @@ Demo details:
 - Who was present: ${attendees || 'not specified'}
 - What was covered: ${covered || 'not specified'}
 - Package recommended: ${pkg || 'not discussed yet'}
-- What the client asked for / was interested in: ${clientAsk || 'not specified'}
+- What the client asked for / was interested in: ${clientAsk || 'not specified'}${resourceLinks}
 
 ${isFullDemo ? `FULL DEMO email rules:
 - Open with something specific from the call — reference what they asked for or what resonated
-- Address their specific ask directly (if they wanted more leads in certain areas, mention that)
+- If the client asked for specific resources or links, include the most relevant ones from the list above
+- Address their specific ask directly
 - Reinforce why the recommended package fits their situation
 - Urgency: competitors are getting those calls right now while they're thinking about it
 - CTA: review the proposal, sign, or schedule a quick Q&A call — keep it soft
 - Do NOT re-explain the whole product. They saw it. Reference it, don't re-pitch it.` : `PARTIAL DEMO email rules:
 - Warm opening — reference what they DID see and acknowledge you didn't finish
 - Create curiosity around what they missed (heat map showing where they're invisible, website gaps, pricing — especially the setup fee waiver)
+- If they asked for resources, include the most relevant link
 - Light ask: 20-30 min to finish what you started
 - Don't oversell — keep it conversational`}
 
@@ -3353,12 +3366,16 @@ async function applyEmailTemplate(companyId, templateId) {
       const firstName = contactDetail?.properties?.firstname || '';
       const contactEmail = contactDetail?.properties?.email || '';
 
+      // Build notes context — include state.lastCallContext even if not saved as a note
+      const savedNotes = (state.notes?.[companyId] || []).slice(0, 10).map(n => `[${n.date}${n.type ? ' · ' + n.type : ''}]\n${n.text}`).join('\n---\n');
+      const allNotesCtx = [savedNotes, state.lastCallContext ? `[Most recent call analysis]\n${state.lastCallContext}` : ''].filter(Boolean).join('\n---\n');
+
       // Extract demo details from call notes
-      let extracted = { attendees: '', covered: '', package: '' };
-      if (notes) {
+      let extracted = { attendees: '', covered: '', package: '', clientAsk: '' };
+      if (allNotesCtx) {
         const extractRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-          system: `Extract specific details from sales call notes. Return only a JSON object, no explanation.`,
-          messages: [{ role: 'user', content: `From these call notes, extract what you can find. Leave a field blank if it's not clearly stated — don't guess.\n\nCall notes:\n${notes}\n\nReturn JSON:\n- "attendees": who was on the call (names/roles, e.g. "John Smith - owner, wife Sarah")\n- "covered": what demo sections were covered (e.g. "live SERP, GBP audit, website review")\n- "package": package recommended and price (e.g. "Strategic Advantage at $750/mo")\n- "clientAsk": what the client specifically asked about or expressed interest in (e.g. "wanted more leads in surrounding neighborhoods, asked about review automation")` }],
+          system: `Extract specific details from sales call notes. Return only a JSON object, no explanation. Be specific and pull real quotes/details when available — don't leave fields blank unless the information truly isn't there at all.`,
+          messages: [{ role: 'user', content: `From these call notes, extract what you can find.\n\nCall notes:\n${allNotesCtx}\n\nReturn JSON:\n- "attendees": who was on the call (names/roles, e.g. "John Smith - owner, wife Sarah")\n- "covered": what demo sections were covered (e.g. "live SERP, GBP audit, website review, pricing")\n- "package": package recommended and price (e.g. "Strategic Advantage at $750/mo")\n- "clientAsk": specific things the client asked about, requested, or expressed interest in — include specific words they used if available` }],
           max_tokens: 200,
         })});
         const extractData = await extractRes.json();
