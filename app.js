@@ -534,15 +534,18 @@ function renderScheduleSection() {
   const filteredCal = (state._cachedCalEvents || []).filter(e => !e.calendarId || !disabled.has(e.calendarId));
   el.innerHTML = `
     <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
-      ${isToday ? `<button class="btn btn-sm ${showTasks ? 'btn-primary' : ''}" onclick="toggleScheduleFilter('tasks')" style="font-size:11px">✅ Tasks</button>` : ''}
       <button class="btn btn-sm ${showCal ? 'btn-primary' : ''}" onclick="toggleScheduleFilter('calendar')" style="font-size:11px">📅 Calendar</button>
-      <span onclick="showView('settings')" style="font-size:11px;color:var(--text3);margin-left:auto;cursor:pointer;text-decoration:underline">⚙️ Cal settings</span>
+      <span onclick="showView('settings')" style="font-size:11px;color:var(--text3);margin-left:auto;cursor:pointer;text-decoration:underline">⚙️ Settings</span>
     </div>` + buildScheduleHTML(showTasks && isToday ? (state._cachedTasks || []) : [], showCal ? filteredCal : [], getCalendarViewDate());
 }
 
 function toggleScheduleFilter(type) {
   if (type === 'tasks') state.scheduleShowTasks = state.scheduleShowTasks !== false ? false : true;
   if (type === 'calendar') state.scheduleShowCal = state.scheduleShowCal !== false ? false : true;
+  if (type === 'overdue') state.scheduleShowOverdue = state.scheduleShowOverdue !== false ? false : true;
+  if (type === 'tasks' || type === 'overdue') {
+    fetch('/api/users?action=setcalprefs', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ showTasks: state.scheduleShowTasks !== false, showOverdue: state.scheduleShowOverdue !== false }) }).catch(() => {});
+  }
   renderScheduleSection();
 }
 
@@ -646,7 +649,7 @@ function buildScheduleHTML(allTasks, calEvents, viewDate) {
 
   html += `<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Schedule</div>${noCalMsg}${timelineHtml}</div>`;
 
-  if (overdue.length) html += `<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚠️ Overdue — ${overdue.length}</div><div style="display:flex;flex-direction:column;gap:6px">${overdue.map(t => taskCard(t, true)).join('')}</div></div>`;
+  if (overdue.length && state.scheduleShowOverdue !== false) html += `<div style="margin-bottom:20px"><div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">⚠️ Overdue — ${overdue.length}</div><div style="display:flex;flex-direction:column;gap:6px">${overdue.map(t => taskCard(t, true)).join('')}</div></div>`;
 
   const dueSectionLabel = isViewToday ? 'Due Today' : vd.toLocaleDateString('en-US', { month:'short', day:'numeric' });
   if (untimedItems.length) html += `<div><div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">${dueSectionLabel}</div><div style="display:flex;flex-direction:column;gap:6px">${untimedItems.map(item => item.kind === 'allday' ? `<div style="padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:var(--radius)"><div style="font-size:13px;font-weight:600;color:var(--text)">📅 ${item.data.summary || 'All-day event'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">All day</div></div>` : taskCard(item.data)).join('')}</div></div>`;
@@ -2434,6 +2437,31 @@ async function renderSettingsView() {
       <div style="display:flex;flex-direction:column;gap:28px">
 
         <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🗓️ Schedule Preferences</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Control what shows up on your daily schedule view.</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg3);border-radius:6px;cursor:pointer" onclick="toggleScheduleFilter('tasks')">
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--text)">✅ Show HubSpot Tasks</div>
+                <div style="font-size:12px;color:var(--text3);margin-top:2px">Display today's tasks from HubSpot on the schedule</div>
+              </div>
+              <div style="width:36px;height:20px;border-radius:10px;background:${state.scheduleShowTasks !== false ? 'var(--blue)' : 'var(--border2)'};position:relative;flex-shrink:0;transition:background .15s" id="toggle-tasks-pill">
+                <div style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;${state.scheduleShowTasks !== false ? 'right:2px' : 'left:2px'};transition:all .15s" id="toggle-tasks-knob"></div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg3);border-radius:6px;cursor:pointer" onclick="toggleScheduleFilter('overdue')">
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--text)">⚠️ Show Overdue Tasks</div>
+                <div style="font-size:12px;color:var(--text3);margin-top:2px">Show tasks past their due date at the bottom of the schedule</div>
+              </div>
+              <div style="width:36px;height:20px;border-radius:10px;background:${state.scheduleShowOverdue !== false ? 'var(--blue)' : 'var(--border2)'};position:relative;flex-shrink:0;transition:background .15s" id="toggle-overdue-pill">
+                <div style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;${state.scheduleShowOverdue !== false ? 'right:2px' : 'left:2px'};transition:all .15s" id="toggle-overdue-knob"></div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div>
           <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">📅 Calendar Preferences</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Choose which calendars appear on your dashboard. Saves permanently to your account.</div>
           <div id="cal-prefs-section">
@@ -2596,7 +2624,11 @@ async function loadCalendarPrefs() {
   try {
     const res = await fetch('/api/users?action=getcalprefs', { headers: { Authorization: `Bearer ${state.token}` } });
     const data = await res.json();
-    if (data.prefs) state.calendarPrefs = { disabledCalendars: data.prefs.disabledCalendars || [] };
+    if (data.prefs) {
+      state.calendarPrefs = { disabledCalendars: data.prefs.disabledCalendars || [] };
+      if (data.prefs.showTasks !== undefined) state.scheduleShowTasks = data.prefs.showTasks;
+      if (data.prefs.showOverdue !== undefined) state.scheduleShowOverdue = data.prefs.showOverdue;
+    }
   } catch {}
 }
 

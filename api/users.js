@@ -322,8 +322,9 @@ export default async function handler(req, res) {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await kvGet(`session:${token}`);
     if (!session) return res.status(401).json({ error: 'Not logged in' });
-    const { disabledCalendars } = req.body;
-    await kvSet(`calprefs:${session.email}`, { disabledCalendars: disabledCalendars || [] });
+    const existing = await kvGet(`calprefs:${session.email}`) || {};
+    const merged = { ...existing, ...req.body };
+    await kvSet(`calprefs:${session.email}`, merged);
     return res.status(200).json({ ok: true });
   }
 
