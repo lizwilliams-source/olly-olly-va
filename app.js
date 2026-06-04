@@ -3495,9 +3495,9 @@ async function applyEmailTemplate(companyId, templateId) {
       let extracted = { attendees: '', covered: '', package: '', clientAsk: '' };
       if (allNotesCtx) {
         const extractRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-          system: `Extract specific details from sales call notes. Return only a JSON object, no explanation. Be specific and pull real quotes/details when available — don't leave fields blank unless the information truly isn't there at all.`,
-          messages: [{ role: 'user', content: `From these call notes, extract what you can find.\n\nCall notes:\n${allNotesCtx}\n\nReturn JSON:\n- "attendees": who was on the call (names/roles, e.g. "John Smith - owner, wife Sarah")\n- "covered": what demo sections were covered (e.g. "live SERP, GBP audit, website review, pricing")\n- "package": package recommended and price (e.g. "Strategic Advantage at $750/mo")\n- "clientAsk": specific things the client asked about, requested, or expressed interest in — include specific words they used if available` }],
-          max_tokens: 200,
+          system: `Extract specific details from sales call notes and coaching scorecards. Return only a JSON object, no explanation. Notes may be formatted as HTML coaching scorecards — extract info from the section labels and score notes. Be specific.`,
+          messages: [{ role: 'user', content: `Extract from these notes. Notes may include coaching scorecards with section labels (Intro, Setting the Demo, Website Situation, etc.) and freeform notes.\n\nNotes:\n${allNotesCtx.slice(0, 3000)}\n\nReturn JSON:\n- "attendees": who was on the call — look for names, owner, spouse, partner, family mentions\n- "covered": what was shown — look for mentions of SERP, GBP, website, pricing, heat map, social, reviews, citations\n- "package": package and price — look for Growth Essentials/Strategic Advantage/Elite Expansion + dollar amounts\n- "clientAsk": what they were interested in or asked about — look for questions, requests, pain points mentioned in notes` }],
+          max_tokens: 300,
         })});
         const extractData = await extractRes.json();
         try { extracted = JSON.parse((extractData.content?.[0]?.text || '{}').replace(/```json|```/g,'').trim()); } catch {}
@@ -3506,10 +3506,16 @@ async function applyEmailTemplate(companyId, templateId) {
       const hasExtracted = extracted.attendees || extracted.covered || extracted.package || extracted.clientAsk;
       state._demoEmailMeta = { companyId, templateId, contactEmail, firstName, callDate: mostRecentCallDate };
 
+      // Show first 600 chars of notes so rep can fill in manually if extraction missed things
+      const notesPreview = allNotesCtx.slice(0, 600).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
       document.getElementById('modal-body').innerHTML = `
         <div style="display:flex;flex-direction:column;gap:14px">
-          <div style="font-size:12px;color:var(--text3)">${hasExtracted ? 'Pulled from call — verify and fill in anything missing.' : 'Nothing found to extract — fill in manually.'}</div>
-          <div style="font-size:10px;color:var(--text3);background:var(--bg3);padding:4px 8px;border-radius:4px;font-family:monospace">${debugInfo}</div>
+          <div style="font-size:12px;color:var(--text3)">${hasExtracted ? 'Pulled from call — verify anything missing.' : 'Extraction came up blank — fill in from the notes below.'}</div>
+          ${allNotesCtx ? `<details style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 10px">
+            <summary style="font-size:11px;color:var(--text2);cursor:pointer;font-weight:600">📋 Notes found (${debugInfo})</summary>
+            <div style="font-size:11px;color:var(--text3);margin-top:8px;white-space:pre-wrap;line-height:1.5;max-height:140px;overflow-y:auto">${notesPreview}${allNotesCtx.length > 600 ? '…' : ''}</div>
+          </details>` : `<div style="font-size:11px;color:var(--amber);padding:6px 10px;background:var(--bg3);border-radius:6px">⚠️ No notes found (${debugInfo}) — fill in from memory.</div>`}
           <div>
             <div class="field-label" style="margin-bottom:4px">Who was present?</div>
             <input id="demo-attendees" value="${(extracted.attendees || '').replace(/"/g,'&quot;')}" placeholder="e.g. John (owner), wife Sarah" style="${ta}" />
