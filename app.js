@@ -3249,62 +3249,77 @@ async function generateDemoEmail() {
   const covered    = document.getElementById('demo-covered')?.value.trim() || '';
   const pkg        = document.getElementById('demo-package')?.value.trim() || '';
   const clientAsk  = document.getElementById('demo-client-ask')?.value.trim() || '';
+  const docSent    = document.getElementById('demo-doc-sent')?.value.trim() || '';
 
   document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Writing email...</div>`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
 
   try {
-    const docSent = document.getElementById('demo-doc-sent')?.value.trim() || '';
-
-    // Build resource context from org settings + demo script case studies
-    let resourceLinks = '';
-    if (/resource|case stud|example|blog|website|article|guide|link|send/i.test(clientAsk + ' ' + docSent)) {
-      const orgLinks = state.orgSettings?.resourceLinks || [];
-      const scriptResources = [
-        'Case Study: Accent Awnings (CA) — ranked #1 San Diego, #2 Orange County for "Awning Installation" | https://www.ollyolly.com',
-        'Case Study: Forte Builders (UT) — remodeling/general contractor, now ranking top 3 across multiple cities | https://www.ollyolly.com',
-        'Case Study: GreenOak Exteriors (VA) — roofing/home services, went from invisible to top 3 in DC metro | https://www.ollyolly.com',
-      ];
-      const allResources = [...orgLinks, ...(orgLinks.length ? [] : scriptResources)];
-      if (allResources.length) resourceLinks = `\n\nOlly Olly resources (include the most relevant 1-2 for this prospect's industry):\n${allResources.join('\n')}`;
-    }
+    // Case studies from demo script — always available
+    const caseStudies = `Available Olly Olly case studies to reference if relevant:
+- Accent Awnings (CA, awning installation): was on page 3, now #1 in San Diego + #2 in Orange County for "Awning Installation" within ~90 days
+- Forte Builders (UT, remodeling/general contractor): Google didn't know what they specialized in — built dedicated service pages, now top 3 across multiple cities south of Salt Lake City
+- GreenOak Exteriors (VA, roofing/home services): went from nearly invisible online to top 3 across the DC metro for roofing searches
+If client asked for info/resources, weave in the most industry-relevant case study naturally. No need for a direct link — rep can follow up with the full story.`;
 
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-      system: `You write post-demo follow-up emails for Olly Olly sales reps. Olly Olly is a digital marketing agency selling to home service contractors. Write like a real person — casual, warm, specific. Never say "the business" — use "you/your/you guys". No buzzwords. No AI phrases. NEVER mention that Olly Olly works with other businesses in the prospect's area or city unless the rep explicitly provided that information.`,
-      messages: [{ role: 'user', content: `Write a ${isFullDemo ? 'post-full-demo' : 'post-partial-demo'} follow-up email.
+      system: `You write post-demo follow-up emails for Olly Olly sales reps. Match this style EXACTLY:
 
-Company: ${c?.name || ''}
-Rep name: ${senderName}
+EXAMPLE (full demo, rep recommending Growth Essentials):
+---
+Hey Don,
+
+Great talking with you, Judy, and Cameron this morning! Love that you guys are a family operation.
+
+You mentioned wanting to know more about who we are and how we work. Quick version: we've been doing this for home service contractors for a while now. We're not a big corporate thing — we actually work one-on-one with our clients and stick around to make sure the work we do turns into calls. No "set it and forget it" nonsense.
+
+I recommend the Growth Essentials package at $600/month. You guys are solid at what you do, but your Google visibility is all over the place. One month you're getting calls, the next month it's crickets. That package gets you consistent, which means consistent lead flow. For that, we manage your website, your Google listings, and your reviews — which leads to more visibility on Google, and more calls.
+
+Liz Williams
+National Account Executive
+Olly Olly
+---
+
+RULES — non-negotiable:
+- SHORT: 3-4 paragraphs max, each 1-3 sentences
+- Start with "Hey [First Name]," not "Hi" or "Hello"
+- Second line: warm specific opener referencing who was on the call + one real observation
+- Address their specific ask directly, plainly
+- Package paragraph: name it, price it, give ONE reason it fits THEIR specific situation using their actual words, then what it does in plain English
+- No corporate words: no "leverage", "synergy", "circle back", "moving forward", "touch base", "reach out"
+- No filler: no "I hope this finds you well", no "as per our conversation", no "please don't hesitate"
+- Sign off is JUST: [Name] / National Account Executive / Olly Olly — nothing else
+- NEVER say Olly Olly works with businesses in their area unless told
+- Use the actual call date — do NOT say "yesterday" unless that's literally the date`,
+      messages: [{ role: 'user', content: `Write a ${isFullDemo ? 'post-full-demo follow-up' : 'partial demo follow-up (they didn\'t finish the demo)'} email.
+
+Rep: ${senderName}
 Prospect first name: ${firstName || '[First Name]'}
-Demo date: ${callDate || 'recent'}
+Company: ${c?.name || ''}
+Call date: ${callDate || 'recent'}
 
-Demo details:
-- Who was present: ${attendees || 'not specified'}
-- What was covered: ${covered || 'not specified'}
-- Package recommended: ${pkg || 'not discussed yet'}
-- What the client asked for / was interested in: ${clientAsk || 'not specified'}
-- Document sent: ${docSent || 'none'}${resourceLinks}
+What the rep filled in:
+- Who was present: ${attendees || '(not provided)'}
+- What was covered in the demo: ${covered || '(not provided)'}
+- Package recommended + price: ${pkg || '(not provided)'}
+- What the client asked about or wanted: ${clientAsk || '(not provided)'}
+- Document sent: ${docSent || 'none'}
 
-IMPORTANT: Use the actual demo date above when referencing the call (e.g. "Great talking on Monday" not "Great talking yesterday"). Do not assume it was yesterday.
+${caseStudies}
 
-${isFullDemo ? `FULL DEMO email rules:
-- Open with something specific from the call — reference what they asked for or what resonated
-- If the client asked for specific resources or links, include the most relevant ones from the list above
-- Address their specific ask directly
-- Reinforce why the recommended package fits their situation
-- Urgency: competitors are getting those calls right now while they're thinking about it
-- CTA: review the proposal, sign, or schedule a quick Q&A call — keep it soft
-- Do NOT re-explain the whole product. They saw it. Reference it, don't re-pitch it.` : `PARTIAL DEMO email rules:
-- Warm opening — reference what they DID see and acknowledge you didn't finish
-- Create curiosity around what they missed (heat map showing where they're invisible, website gaps, pricing — especially the setup fee waiver)
-- If they asked for resources, include the most relevant link
-- Light ask: 20-30 min to finish what you started
-- Don't oversell — keep it conversational`}
+${isFullDemo
+  ? `This was a full demo. Write a follow-up that:
+1. Opens with the call date reference + names everyone who was there + one specific warm observation
+2. If they asked for info about OO, answer it casually (1-2 sentences — who OO is, how they work)
+3. Recommends the package with their specific situation as the reason + what it does in one sentence
+4. If they asked for a case study/resources, reference the most relevant one by name + result`
+  : `This demo got cut short. Write a follow-up that:
+1. Opens warmly referencing what you DID cover
+2. Teases the 2-3 most valuable things they didn't get to see (heat map, website analysis, pricing/setup fee waiver)
+3. Soft ask to finish — 20-30 min is all it takes`}
 
-Sign off: "${senderName} / National Account Executive / Olly Olly"
-
-Return ONLY JSON: { "subject": "...", "body": "..." }. Body uses plain \\n line breaks, no markdown.` }],
-      max_tokens: 700,
+Return ONLY JSON: { "subject": "...", "body": "..." }. Body uses plain \\n, no markdown, no bullet points.` }],
+      max_tokens: 600,
     })});
     const data = await res.json();
     const text = data.content?.[0]?.text || '';
@@ -3437,7 +3452,10 @@ async function applyEmailTemplate(companyId, templateId) {
           if (sorted[0]?.properties.hs_timestamp && !mostRecentCallDate) {
             mostRecentCallDate = new Date(+sorted[0].properties.hs_timestamp).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
           }
-          hsCallBody = sorted.filter(c => c.properties.hs_call_body).slice(0, 3)
+          const PLACEHOLDER = /call logged via olly olly/i;
+          hsCallBody = sorted
+            .filter(c => c.properties.hs_call_body && !PLACEHOLDER.test(c.properties.hs_call_body))
+            .slice(0, 3)
             .map(c => `[HubSpot call note · ${new Date(+c.properties.hs_timestamp).toLocaleDateString()}]\n${c.properties.hs_call_body}`)
             .join('\n---\n');
         }
@@ -3457,31 +3475,31 @@ async function applyEmailTemplate(companyId, templateId) {
         try { extracted = JSON.parse((extractData.content?.[0]?.text || '{}').replace(/```json|```/g,'').trim()); } catch {}
       }
 
-      const iLabel = s => s ? `<span style="font-size:10px;color:var(--green);font-weight:600;margin-left:6px">✓ extracted</span>` : `<span style="font-size:10px;color:var(--amber);font-weight:600;margin-left:6px">fill in</span>`;
+      const hasExtracted = extracted.attendees || extracted.covered || extracted.package || extracted.clientAsk;
       state._demoEmailMeta = { companyId, templateId, contactEmail, firstName, callDate: mostRecentCallDate };
 
       document.getElementById('modal-body').innerHTML = `
         <div style="display:flex;flex-direction:column;gap:14px">
-          <div style="font-size:12px;color:var(--text3)">Verify or fill in any missing details — the email will be written around these.</div>
+          <div style="font-size:12px;color:var(--text3)">${hasExtracted ? 'Pulled from call — verify and fill in anything missing.' : 'Fill in what you remember from the call.'}</div>
           <div>
-            <div class="field-label" style="margin-bottom:4px">Who was present for the demo?${iLabel(extracted.attendees)}</div>
-            <input id="demo-attendees" value="${(extracted.attendees || '').replace(/"/g,'&quot;')}" placeholder="e.g. John Smith (owner), wife Sarah" style="${ta}" />
+            <div class="field-label" style="margin-bottom:4px">Who was present?</div>
+            <input id="demo-attendees" value="${(extracted.attendees || '').replace(/"/g,'&quot;')}" placeholder="e.g. John (owner), wife Sarah" style="${ta}" />
           </div>
           <div>
-            <div class="field-label" style="margin-bottom:4px">What did you go over?${iLabel(extracted.covered)}</div>
-            <textarea id="demo-covered" placeholder="e.g. live SERP, GBP audit, website gaps, pricing" style="${ta};min-height:70px;font-family:inherit;resize:vertical">${(extracted.covered || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+            <div class="field-label" style="margin-bottom:4px">What did you go over?</div>
+            <textarea id="demo-covered" placeholder="e.g. live SERP, GBP audit, website gaps, pricing" style="${ta};min-height:60px;font-family:inherit;resize:vertical">${(extracted.covered || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
           </div>
           <div>
-            <div class="field-label" style="margin-bottom:4px">Package recommended + price?${iLabel(extracted.package)}</div>
-            <input id="demo-package" value="${(extracted.package || '').replace(/"/g,'&quot;')}" placeholder="e.g. Strategic Advantage at $750/mo" style="${ta}" />
+            <div class="field-label" style="margin-bottom:4px">Package + price?</div>
+            <input id="demo-package" value="${(extracted.package || '').replace(/"/g,'&quot;')}" placeholder="e.g. Growth Essentials at $600/mo" style="${ta}" />
           </div>
           <div>
-            <div class="field-label" style="margin-bottom:4px">What did the client ask for / express interest in?${iLabel(extracted.clientAsk)}</div>
-            <textarea id="demo-client-ask" placeholder="e.g. more leads in surrounding cities, wanted to know if reviews could be automated" style="${ta};min-height:70px;font-family:inherit;resize:vertical">${(extracted.clientAsk || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+            <div class="field-label" style="margin-bottom:4px">What did they ask about or want?</div>
+            <textarea id="demo-client-ask" placeholder="e.g. wanted to know who else we work with, asked about reviews" style="${ta};min-height:60px;font-family:inherit;resize:vertical">${(extracted.clientAsk || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
           </div>
           <div>
-            <div class="field-label" style="margin-bottom:4px">Was a document sent? If so, what?</div>
-            <input id="demo-doc-sent" value="" placeholder="e.g. PandaDoc proposal, pricing one-pager (leave blank if nothing sent)" style="${ta}" />
+            <div class="field-label" style="margin-bottom:4px">Was a doc sent?</div>
+            <input id="demo-doc-sent" value="" placeholder="e.g. PandaDoc proposal (leave blank if none)" style="${ta}" />
           </div>
         </div>`;
       document.getElementById('modal-footer').innerHTML = `
