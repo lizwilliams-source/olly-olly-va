@@ -3185,10 +3185,17 @@ async function openEmailCompose(companyId, useCallContext = false) {
       state.notes[companyId] = [{ text: state.lastCallContext, date: 'Current call', type: 'call_analysis' }, ...existing];
   }
   document.getElementById('modal-title').innerHTML = `✉️ Email — ${c.name}`;
-  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Preparing email...</div>`;
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Choose email type</div>
+      ${EMAIL_TEMPLATES.map(t => `
+        <button onclick="applyEmailTemplate('${companyId}','${t.id}')" style="text-align:left;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:12px 14px;cursor:pointer;width:100%">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${t.name}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:3px">${t.description}</div>
+        </button>`).join('')}
+    </div>`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
   document.getElementById('modal').style.display = 'flex';
-  await applyEmailTemplate(companyId, 'cadiah');
 }
 
 async function generateEmailDraft(companyId) {
@@ -3260,10 +3267,81 @@ async function applyEmailTemplate(companyId, templateId) {
   if (!c || !template) return;
 
   const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
-  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Generating findings with AI...</div>`;
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Drafting with AI...</div>`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
 
   const notes = (state.notes?.[companyId] || []).slice(0, 5).map(n => n.text).join('\n---\n');
+
+  // ── DEMO FOLLOW-UP TEMPLATES ────────────────────────────────────────────────
+  if (templateId === 'full_demo' || templateId === 'partial_demo') {
+    try {
+      const contactIds = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({}));
+      const firstContactId = (contactIds.results || [])[0]?.id;
+      const contactDetail = firstContactId ? await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${firstContactId}?properties=firstname,lastname,email`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})) : {};
+      const firstName = contactDetail?.properties?.firstname || '';
+      const contactEmail = contactDetail?.properties?.email || '';
+      const senderName = state.user?.name || '[Your Name]';
+      const isFullDemo = templateId === 'full_demo';
+
+      const demoScriptContext = `Olly Olly Demo Flow (what was shown):
+1. Live SERP — showed what homeowners see searching [industry] in [city], where top 3 map pack calls go
+2. GBP Audit — reviewed their profile gaps: reviews cadence, photos, primary category, services, hours, service areas
+3. Platform overview — GBP management (offense/defense/reviews), social media on autopilot, citation cleanup across 40 directories, competitive heat map, website with service+city pages, retargeting ads
+4. Pricing — Growth Essentials $600/mo, Strategic Advantage $750/mo (most common), Elite Expansion $1,400/mo. All start 6-month commitment then month-to-month. $1,500 setup fee waived as first-call incentive.
+5. Key framing used: "Google doesn't rank the best business, it ranks the most visible and consistent one." Revenue gap = calls going to competitors, not because they do better work.`;
+
+      const aiRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+        system: `You write post-demo follow-up emails for Olly Olly sales reps. Olly Olly is an SEO/digital marketing agency selling to home service contractors. Write like a real human — casual, specific, warm. Never say "the business" — use "you/your/you guys". No buzzwords. No AI-sounding phrases.`,
+        messages: [{ role: 'user', content: `Write a ${isFullDemo ? 'post-full-demo' : 'post-partial-demo'} follow-up email.
+
+Company: ${c.name}
+Location: ${[c.city, c.state].filter(Boolean).join(', ') || 'Unknown'}
+Rep: ${senderName}
+Prospect first name: ${firstName || '[First Name]'}
+
+${demoScriptContext}
+
+Call notes (most recent first):
+${notes || 'No notes available — write based on a typical demo scenario'}
+
+${isFullDemo ? `FULL DEMO: The rep ran the complete demo from SERP reveal through pricing. Write a follow-up that:
+- Opens with a warm, specific callback to something from the call (pain point, revenue gap, or a moment that resonated)
+- Briefly reinforces the urgency — competitors are getting those calls right now
+- References the package that made sense for them if it's in the notes, or keeps it open
+- Has a soft but clear CTA: review what was discussed, sign, or schedule a quick call to answer questions
+- Closing should feel like a natural next step, not a hard close` : `PARTIAL DEMO: The demo got cut short or ran out of time before finishing. Write a follow-up that:
+- Warmly acknowledges the conversation and what they DID get to see
+- Creates curiosity about what they didn't get to (the heat map, website analysis, and pricing are powerful closers)
+- Makes the ask feel light — offer to pick up where you left off, 20-30 minutes
+- Keep it short — one paragraph of callback, one of tease, one CTA`}
+
+Return ONLY a JSON object with "subject" and "body" fields. The body should use plain line breaks (\\n), no markdown. Sign off with the rep's name and "National Account Executive / Olly Olly".` }],
+        max_tokens: 700,
+      })});
+      const aiData = await aiRes.json();
+      const text = aiData.content?.[0]?.text || '';
+      let subject = '', body = '';
+      try { const p = JSON.parse(text.replace(/```json|```/g,'').trim()); subject = p.subject || ''; body = p.body || text; }
+      catch { subject = isFullDemo ? `Great talking today, ${firstName || '[First Name]'}` : `Picking up where we left off, ${firstName || '[First Name]'}`; body = text; }
+
+      state._emailImages = [];
+      document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+        <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" value="${contactEmail}" placeholder="recipient@example.com" style="${ta}" /></div>
+        <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
+        <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:300px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+      </div>`;
+      document.getElementById('modal-footer').innerHTML = `
+        <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
+        <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
+        <button class="btn btn-sm" onclick="openMailto()">↗ Open in Gmail</button>
+        <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send</button>`;
+    } catch (e) {
+      document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
+      document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
+    }
+    return;
+  }
+  // ── END DEMO TEMPLATES ──────────────────────────────────────────────────────
   const website = c.rawProps?.website || c.rawProps?.domain || '';
 
   try {
@@ -3385,9 +3463,20 @@ state.allHubSpotProps = null;
 const EMAIL_TEMPLATES = [
   {
     id: 'cadiah',
-    name: 'Cadiah Email',
+    name: 'GK Email',
+    description: 'First touch — research-based findings about their online presence',
     subject: 'Quick thought on [Company Name]',
     body: `Hi [First Name],\n\nHope you're doing well.\n\nMy name is [SENDER_NAME] and I work with Olly Olly. I recently connected with [Employee Name] on your team and wanted to reach out personally.\n\nWhile doing some research on your online presence, I noticed a few things that caught my attention and thought it made sense to introduce myself rather than make assumptions about what may or may not already be in the works.\n\nOne thing I noticed was [FINDING_1]\n\nI also came across [FINDING_2]\n\nI could be completely off base, which is why I'd love to get your perspective. In 15-20 minutes I can show you exactly what homeowners in your area are seeing when they search — and whether the calls are landing where they should be.\n\nDo you have some time this week or next?\n\nLooking forward to connecting.\n\nBest,\n[SENDER_NAME]\nNational Account Executive\nOlly Olly\n\nP.S. If there is someone else on the team who oversees your marketing efforts, feel free to point me in the right direction.`,
+  },
+  {
+    id: 'full_demo',
+    name: 'Full Demo Follow-up',
+    description: 'Ran the complete demo — reinforce value, drive the next step',
+  },
+  {
+    id: 'partial_demo',
+    name: 'Partial Demo Follow-up',
+    description: 'Demo got cut short — warm follow-up to finish the conversation',
   },
 ];
 
