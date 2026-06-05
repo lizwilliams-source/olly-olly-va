@@ -26,6 +26,7 @@ const state = {
   contactsPageSize: 50,
   contactsFilterTimezone: '',
   contactsFilterLeadSource: '',
+  _queueIdx: 0,
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -268,7 +269,11 @@ async function removeFromQueue(companyId, queueId) {
     if (data.queues) {
       state.queues = data.queues;
       updateQueueBadge();
-      if (state.currentView === 'myqueue') renderMyQueue();
+      if (state.currentView === 'myqueue') {
+        const q = state.queues.find(q => q.id === (queueId || state.activeQueueId));
+        if (q) state._queueIdx = Math.min(state._queueIdx || 0, Math.max(0, q.companies.length - 1));
+        renderMyQueue();
+      }
     }
   } catch (e) { toast('Failed to remove from queue', 'error'); }
 }
@@ -311,6 +316,7 @@ async function clearQueue(queueId) {
 
 function switchQueue(queueId) {
   state.activeQueueId = queueId;
+  state._queueIdx = 0;
   renderMyQueue();
 }
 
@@ -1229,6 +1235,20 @@ async function renderMyQueue() {
   const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
   const companies = activeQueue?.companies || [];
   const totalCompanies = state.queues.reduce((s, q) => s + q.companies.length, 0);
+  state._queueIdx = Math.min(state._queueIdx || 0, Math.max(0, companies.length - 1));
+  const idx = state._queueIdx;
+  const c = companies[idx];
+  const contact = c ? (state.contacts.find(x => x.id === c.id) || null) : null;
+  const hsUrl = c ? `https://app.hubspot.com/contacts/45530742/company/${c.id}` : '';
+  const cleanPhone = (c?.phone || '').replace(/\D/g, '');
+  const ta = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;width:100%;min-height:72px;resize:vertical';
+
+  const queueTabs = state.queues.map(q => `
+    <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:${q.id === activeQueue?.id ? 'var(--purple)' : 'var(--bg3)'};color:${q.id === activeQueue?.id ? 'white' : 'var(--text2)'};cursor:pointer;font-size:12px;font-weight:600;border:1px solid ${q.id === activeQueue?.id ? 'transparent' : 'var(--border)'}" onclick="switchQueue('${q.id}')">
+      <span>${q.name}</span><span style="opacity:0.65;font-size:11px">${q.companies.length}</span>
+      <span onclick="event.stopPropagation();promptRenameQueue('${q.id}','${q.name.replace(/'/g,"\\'")}')">✏️</span>
+      ${state.queues.length > 1 ? `<span onclick="event.stopPropagation();deleteQueue('${q.id}')">✕</span>` : ''}
+    </div>`).join('');
 
   document.getElementById('main').innerHTML = `
     <div class="topbar">
@@ -1238,46 +1258,100 @@ async function renderMyQueue() {
         ${activeQueue ? `<button class="btn" onclick="clearQueue('${activeQueue.id}')">🗑 Clear</button>` : ''}
       </div>
     </div>
-    <div class="content">
+    <div class="content" style="max-width:640px">
       <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-        ${state.queues.length === 0 ? '<div style="font-size:13px;color:var(--text2)">No queues yet.</div>' : state.queues.map(q => `
-          <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:${q.id === activeQueue?.id ? 'var(--purple)' : 'var(--bg3)'};color:${q.id === activeQueue?.id ? 'white' : 'var(--text2)'};cursor:pointer;font-size:12px;font-weight:600;border:1px solid ${q.id === activeQueue?.id ? 'transparent' : 'var(--border)'}" onclick="switchQueue('${q.id}')">
-            <span>${q.name}</span>
-            <span style="opacity:0.65;font-size:11px">${q.companies.length}</span>
-            <span onclick="event.stopPropagation();promptRenameQueue('${q.id}','${q.name.replace(/'/g, "\\'")}')" style="opacity:0.55;font-size:10px;margin-left:2px" title="Rename">✏️</span>
-            ${state.queues.length > 1 ? `<span onclick="event.stopPropagation();deleteQueue('${q.id}')" style="opacity:0.55;font-size:11px;font-weight:700;margin-left:1px" title="Delete">✕</span>` : ''}
-          </div>`).join('')}
+        ${state.queues.length === 0 ? '<div style="font-size:13px;color:var(--text2)">No queues yet.</div>' : queueTabs}
       </div>
-      <div id="queue-list" class="lead-list">
-        ${companies.length === 0
-          ? `<div class="empty-state">${state.queues.length === 0 ? 'Create a queue first using "+ New Queue" above.' : 'This queue is empty. Add companies from any list.'}</div>`
-          : companies.map(c => {
-              const cleanPhone = c.phone ? c.phone.replace(/\D/g,'') : '';
-              const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
-              const colors = [{bg:'rgba(79,142,247,.2)',color:'#4f8ef7'},{bg:'rgba(62,207,142,.2)',color:'#3ecf8e'},{bg:'rgba(245,166,35,.2)',color:'#f5a623'},{bg:'rgba(240,82,82,.2)',color:'#f05252'},{bg:'rgba(167,139,250,.2)',color:'#a78bfa'}];
-              const ac = colors[parseInt(c.id,10) % colors.length];
-              const initials = c.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-              return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--purple);border-radius:var(--radius)">
-                <div class="avatar" style="background:${ac.bg};color:${ac.color};flex-shrink:0;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${initials}</div>
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px">
-                    <span style="cursor:pointer;text-decoration:underline;text-underline-offset:3px" onclick="openContact('${c.id}')">${c.name}</span>
-                    <a href="${hsUrl}" target="_blank" style="font-size:10px;color:var(--text3);text-decoration:none;border:1px solid var(--border2);padding:1px 6px;border-radius:4px">HS ↗</a>
-                  </div>
-                  <div style="font-size:11px;color:var(--text2);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap">
-                    ${c.timezone ? `<span>🕐 ${c.timezone}</span>` : ''}
-                    ${c.leadSource ? `<span>· 📌 ${c.leadSource}</span>` : ''}
-                    ${c.stage ? `<span>· <span style="color:var(--amber)">${c.stage}</span></span>` : ''}
-                  </div>
-                </div>
-                <div style="flex-shrink:0;display:flex;align-items:center;gap:8px">
-                  ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:14px;white-space:nowrap">📞 ${c.phone}</a>` : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
-                  <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="removeFromQueue('${c.id}','${activeQueue.id}')">Remove</button>
-                </div>
-              </div>`;
-            }).join('')}
-      </div>
+      ${companies.length === 0
+        ? `<div class="empty-state">${state.queues.length === 0 ? 'Create a queue first.' : 'This queue is empty. Add companies from HS Views.'}</div>`
+        : `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <button class="btn btn-sm" onclick="queueNav(-1)" ${idx <= 0 ? 'disabled' : ''}>← Prev</button>
+            <span style="font-size:13px;color:var(--text2);font-weight:600">${idx + 1} of ${companies.length}</span>
+            <button class="btn btn-sm" onclick="queueNav(1)" ${idx >= companies.length - 1 ? 'disabled' : ''}>Next →</button>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px">
+              <div style="min-width:0">
+                <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:4px">${c.name}</div>
+                <div style="font-size:12px;color:var(--text3)">${[contact?.city && contact?.state ? contact.city+', '+contact.state : '', contact?.masterStage || contact?.stage || '', contact?.leadSource || ''].filter(Boolean).join(' · ')}</div>
+              </div>
+              <div style="display:flex;gap:6px;flex-shrink:0">
+                <a href="${hsUrl}" target="_blank" class="btn btn-sm" style="font-size:11px">HS ↗</a>
+                <a href="https://www.google.com/search?q=${encodeURIComponent(c.name)}" target="_blank" class="btn btn-sm" style="font-size:11px">🔍 Google</a>
+              </div>
+            </div>
+            <div style="margin-bottom:16px">
+              ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:17px">📞 ${c.phone}</a>` : '<span style="color:var(--text3);font-size:13px">No phone on file</span>'}
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px">
+              <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Log a note</div>
+              <textarea id="queue-note-input" placeholder="Add a call note, meeting summary..." style="${ta}"></textarea>
+              <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="saveQueueNote('${c.id}')">Save to HubSpot</button>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:14px">
+              <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Notes</div>
+              <div id="queue-notes-area" style="font-size:12px;color:var(--text3)">Loading...</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between">
+            <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="removeFromQueue('${c.id}','${activeQueue.id}')">Remove</button>
+            <button class="btn btn-sm" onclick="openContact('${c.id}')" ${!contact ? 'disabled title="Not in your contacts list"' : ''}>View full profile</button>
+          </div>`}
     </div>`;
+
+  if (c) loadQueueNotes(c.id);
+}
+
+function queueNav(dir) {
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  if (!activeQueue) return;
+  state._queueIdx = Math.max(0, Math.min((state._queueIdx || 0) + dir, activeQueue.companies.length - 1));
+  renderMyQueue();
+}
+
+async function loadQueueNotes(companyId) {
+  const area = document.getElementById('queue-notes-area');
+  if (!area) return;
+  const notes = [];
+  try {
+    const nr = await fetch(`/api/users?action=getnotes&companyId=${companyId}`, { headers: { Authorization: `Bearer ${state.token}` } });
+    if (nr.ok) { const { notes: kv } = await nr.json(); notes.push(...(kv || [])); }
+  } catch {}
+  try {
+    const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/notes`, Authorization: `Bearer ${state.token}` } });
+    const assocData = await assocRes.json();
+    const noteIds = (assocData.results || []).map(r => r.id).slice(0, 50);
+    if (noteIds.length) {
+      const noteRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/notes/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: noteIds.map(id => ({ id })), properties: ['hs_note_body', 'hs_timestamp'] }) });
+      const noteData = await noteRes.json();
+      const seen = new Set(notes.map(n => n.text?.trim()));
+      (noteData.results || []).filter(n => n.properties?.hs_note_body).forEach(n => {
+        const text = n.properties.hs_note_body;
+        if (!seen.has(text.trim())) {
+          seen.add(text.trim());
+          notes.push({ text, date: new Date(parseInt(n.properties.hs_timestamp)).toLocaleString() });
+        }
+      });
+    }
+  } catch {}
+  notes.sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!document.getElementById('queue-notes-area')) return;
+  document.getElementById('queue-notes-area').innerHTML = notes.length
+    ? notes.map(n => `<div style="padding:10px 12px;background:var(--bg3);border-radius:6px;margin-bottom:8px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">${n.date}</div><div style="font-size:13px;color:var(--text);white-space:pre-wrap">${n.text}</div></div>`).join('')
+    : '<span style="color:var(--text3)">No notes yet</span>';
+}
+
+async function saveQueueNote(companyId) {
+  const input = document.getElementById('queue-note-input');
+  const text = input?.value.trim();
+  if (!text) return;
+  try {
+    await hsPost('/crm/v3/objects/notes', { properties: { hs_note_body: text, hs_timestamp: Date.now() }, associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }] });
+    toast('Note saved ✓', 'success');
+  } catch { toast('Failed to save note', 'error'); }
+  fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text, date: new Date().toLocaleString() }) }).catch(() => {});
+  if (input) input.value = '';
+  loadQueueNotes(companyId);
 }
 
 // ── PIPELINE ──────────────────────────────────────────────────────────────────
