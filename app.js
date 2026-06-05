@@ -804,92 +804,73 @@ state._hsActiveView = null;
 
 async function renderHubSpotViews() {
   const main = document.getElementById('main');
+  const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
   main.innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🔭 HubSpot Views</h2><p>Browse saved HubSpot views and add companies to your queue</p></div>
+      <div class="topbar-left"><h2>🔭 HS Views</h2><p>Paste a HubSpot view URL to load companies and add to queue</p></div>
     </div>
-    <div class="content">
-      <div style="display:grid;grid-template-columns:220px 1fr;gap:16px;align-items:start">
-        <div id="hs-views-sidebar" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
-          <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">Views</div>
-          <div id="hs-views-list" style="padding:8px 0"><div style="padding:8px 12px;font-size:13px;color:var(--text3)">Loading...</div></div>
+    <div class="content" style="max-width:900px">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px">Paste a HubSpot view URL</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Go to any company view in HubSpot, copy the URL from your browser, and paste it here.</div>
+        <div style="display:flex;gap:8px">
+          <input id="hs-view-url" placeholder="https://app.hubspot.com/contacts/45530742/objects/0-2/views/..." style="${ta};flex:1" />
+          <button class="btn btn-primary" onclick="loadHubSpotViewFromUrl()">Load →</button>
         </div>
-        <div id="hs-view-companies">
-          <div style="text-align:center;padding:60px 20px;color:var(--text2)"><div style="font-size:32px;margin-bottom:12px">🔭</div><div style="font-size:14px">Select a view on the left</div></div>
-        </div>
+        <div id="hs-url-error" style="font-size:12px;color:var(--red);margin-top:6px;display:none"></div>
+      </div>
+      <div id="hs-view-companies">
+        <div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">Paste a view URL above to get started</div>
       </div>
     </div>`;
+}
 
-  // Fetch views — try the CRM views endpoint first, fall back to lists
-  if (!state._hsViews) {
-    try {
-      const res = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/objects/companies/views', Authorization: `Bearer ${state.token}` } });
-      const data = await res.json();
-      state._hsViews = data.results || data.views || null;
-    } catch {}
+async function loadHubSpotViewFromUrl() {
+  const input = document.getElementById('hs-view-url')?.value.trim();
+  const errEl = document.getElementById('hs-url-error');
+  errEl.style.display = 'none';
 
-    // Fallback: HubSpot CRM lists filtered to companies
-    if (!state._hsViews) {
-      try {
-        const res = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/lists?objectTypeId=0-2&count=100', Authorization: `Bearer ${state.token}` } });
-        const data = await res.json();
-        state._hsViews = (data.lists || data.results || []).map(l => ({ id: l.listId || l.id, name: l.name, type: 'list', size: l.metaData?.size ?? null }));
-      } catch {}
-    }
-  }
-
-  const viewsList = document.getElementById('hs-views-list');
-  if (!state._hsViews?.length) {
-    viewsList.innerHTML = `<div style="padding:10px 12px;font-size:12px;color:var(--text3)">No views found. Check HubSpot API scopes.</div>`;
+  // Extract view ID from URL — handles formats like:
+  // /objects/0-2/views/12345/list
+  // /companies/list/view/12345/
+  // /contacts/45530742/objects/0-2/views/12345
+  const match = input.match(/views?\/(\d+)/i) || input.match(/view\/(\d+)/i);
+  if (!match) {
+    errEl.textContent = "Couldn't find a view ID in that URL. Make sure you're copying it directly from your HubSpot browser tab.";
+    errEl.style.display = 'block';
     return;
   }
-
-  viewsList.innerHTML = state._hsViews.map(v => `
-    <div onclick="loadHubSpotView('${v.id}','${(v.name||'').replace(/'/g,"\\'")}')"
-      style="padding:9px 12px;cursor:pointer;font-size:13px;color:var(--text);border-left:3px solid transparent;transition:all .1s"
-      id="hs-view-item-${v.id}"
-      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=state._hsActiveView==='${v.id}'?'var(--bg3)':''">
-      ${v.name}${v.size != null ? `<span style="font-size:10px;color:var(--text3);margin-left:6px">${v.size}</span>` : ''}
-    </div>`).join('');
+  const viewId = match[1];
+  await loadHubSpotView(viewId, `View ${viewId}`);
 }
 
 async function loadHubSpotView(viewId, viewName) {
   state._hsActiveView = viewId;
-  // Highlight selected
-  document.querySelectorAll('[id^="hs-view-item-"]').forEach(el => { el.style.background = ''; el.style.borderLeftColor = 'transparent'; });
-  const active = document.getElementById(`hs-view-item-${viewId}`);
-  if (active) { active.style.background = 'var(--bg3)'; active.style.borderLeftColor = 'var(--blue)'; }
-
   const panel = document.getElementById('hs-view-companies');
-  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading ${viewName}...</div>`;
+  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading...</div>`;
 
   try {
-    // Try fetching memberships (for lists)
-    let companyIds = [];
-    const memRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/lists/${viewId}/memberships?limit=100`, Authorization: `Bearer ${state.token}` } });
-    if (memRes.ok) {
-      const memData = await memRes.json();
-      companyIds = (memData.results || memData.inputs || []).map(r => r.recordId || r.id).filter(Boolean);
+    // Try to get the view definition to get its real name + filters
+    let resolvedName = viewName;
+    let filterGroups = [];
+    try {
+      const viewDef = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+      if (viewDef.name) resolvedName = viewDef.name;
+      if (viewDef.filters?.length) filterGroups = viewDef.filters;
+    } catch {}
+
+    // Search using the view's filters (or just search with viewId)
+    const searchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups, properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
+    const searchData = await searchRes.json();
+
+    if (searchData.results?.length) {
+      renderHubSpotViewCompanies(searchData.results, resolvedName, viewId);
+      return;
     }
 
-    // If no memberships, try it as a view with a search
-    if (!companyIds.length) {
-      const viewRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': `/crm/v3/objects/companies/search`, 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100, viewId }) });
-      if (viewRes.ok) {
-        const viewData = await viewRes.json();
-        renderHubSpotViewCompanies(viewData.results || [], viewName, viewId);
-        return;
-      }
-    }
-
-    if (!companyIds.length) { panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies found in this view.</div>`; return; }
-
-    // Batch read company details
-    const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: companyIds.slice(0, 100).map(id => ({ id })), properties: COMPANY_PROPS }) });
-    const batchData = await batchRes.json();
-    renderHubSpotViewCompanies(batchData.results || [], viewName, viewId);
+    panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies found. The view may use filters that require additional API access.</div>`;
   } catch (e) {
-    panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed to load view: ${e.message}</div>`;
+    panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`;
   }
 }
 
