@@ -1,11 +1,16 @@
 // api/hubspot.js - Proxies HubSpot API calls server-side (keeps token off client)
 export const config = { maxDuration: 30 };
 
+const HS_SCOPES = 'crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write crm.objects.deals.read crm.objects.deals.write crm.objects.notes.read crm.objects.notes.write crm.objects.calls.read crm.objects.calls.write crm.objects.tasks.read crm.objects.tasks.write crm.schemas.deals.read crm.schemas.companies.read crm.schemas.contacts.read';
+
 async function getHsToken(KV_URL, KV_TOKEN) {
   const kvH = { Authorization: `Bearer ${KV_TOKEN}` };
   const cached = await fetch(`${KV_URL}/get/hs_access_token`, { headers: kvH }).then(r => r.json());
   if (cached.result) return cached.result;
-  const params = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: process.env.HUBSPOT_REFRESH_TOKEN, client_id: process.env.HUBSPOT_CLIENT_ID, client_secret: process.env.HUBSPOT_CLIENT_SECRET });
+  // Prefer KV-stored refresh token (updated via re-auth) over env var
+  const storedRefresh = await fetch(`${KV_URL}/get/hs_refresh_token`, { headers: kvH }).then(r => r.json());
+  const refreshToken = storedRefresh.result || process.env.HUBSPOT_REFRESH_TOKEN;
+  const params = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: process.env.HUBSPOT_CLIENT_ID, client_secret: process.env.HUBSPOT_CLIENT_SECRET });
   const tokenRes = await fetch('https://api.hubapi.com/oauth/v1/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
   const tokenData = await tokenRes.json();
   if (!tokenRes.ok) throw new Error(tokenData.message || 'Token refresh failed');
@@ -145,6 +150,35 @@ export default async function handler(req, res) {
       return res.status(200).send(Buffer.from(audioBuffer));
     } catch (err) {
       return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // ── HUBSPOT RE-AUTH URL ────────────────────────────────────────────────────
+  if (req.method === 'GET' && req.query.action === 'authurl') {
+    const params = new URLSearchParams({
+      client_id: process.env.HUBSPOT_CLIENT_ID,
+      redirect_uri: 'https://olly-olly-va.vercel.app/api/hubspot?action=oauthcallback',
+      scope: HS_SCOPES,
+    });
+    return res.status(200).json({ url: `https://app.hubspot.com/oauth/authorize?${params}` });
+  }
+
+  // ── HUBSPOT OAUTH CALLBACK ─────────────────────────────────────────────────
+  if (req.method === 'GET' && req.query.action === 'oauthcallback') {
+    const { code } = req.query;
+    const KV_URL = process.env.KV_REST_API_URL;
+    const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+    const kvH = { Authorization: `Bearer ${KV_TOKEN}` };
+    try {
+      const params = new URLSearchParams({ grant_type: 'authorization_code', client_id: process.env.HUBSPOT_CLIENT_ID, client_secret: process.env.HUBSPOT_CLIENT_SECRET, redirect_uri: 'https://olly-olly-va.vercel.app/api/hubspot?action=oauthcallback', code });
+      const tokenRes = await fetch('https://api.hubapi.com/oauth/v1/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() });
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok) return res.status(200).send(`<p style="font-family:sans-serif;color:red">OAuth failed: ${tokenData.message}</p>`);
+      await fetch(`${KV_URL}/set/hs_refresh_token/${encodeURIComponent(tokenData.refresh_token)}`, { headers: kvH });
+      await fetch(`${KV_URL}/del/hs_access_token`, { headers: kvH });
+      return res.status(200).send(`<p style="font-family:sans-serif;color:green;padding:20px">✓ HubSpot reconnected with full scopes. <a href="/">Go back to app →</a></p>`);
+    } catch (e) {
+      return res.status(200).send(`<p style="font-family:sans-serif;color:red;padding:20px">Error: ${e.message}</p>`);
     }
   }
 

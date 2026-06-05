@@ -3213,6 +3213,12 @@ async function renderSettingsView() {
         </div>
 
         ${state.isAdmin ? `<div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔌 HubSpot Connection</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:10px">If HubSpot is missing scopes (e.g. can't create deals), reconnect to grant full access.</div>
+          <button class="btn btn-sm" onclick="reconnectHubSpot()" style="margin-bottom:4px">Reconnect HubSpot with full scopes</button>
+        </div>
+
+        <div>
           <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔗 Company Resource Links</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Links to case studies, blog posts, or resources that reps can include in demo follow-up emails when a prospect asks for them. One URL per line — optionally add a label like "Case Study: Accent Awnings | https://..."</div>
           <textarea id="org-resources" style="width:100%;min-height:120px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px 12px;color:var(--text);font-size:13px;outline:none;font-family:inherit;resize:vertical" placeholder="Case Study: Accent Awnings | https://ollyolly.com/case-studies/accent-awnings&#10;Blog: Why GBP Matters | https://ollyolly.com/blog/gbp&#10;https://ollyolly.com/resources">${(state.orgSettings?.resourceLinks || []).join('\n').replace(/</g,'&lt;')}</textarea>
@@ -3316,6 +3322,14 @@ async function renderSettingsView() {
     const sec = document.getElementById('cal-prefs-section');
     if (sec) sec.innerHTML = `<div style="font-size:13px;color:var(--text3)">Could not load calendars. <button class="btn btn-sm" onclick="connectGoogleCalendar()">Reconnect Google</button></div>`;
   }
+}
+
+async function reconnectHubSpot() {
+  try {
+    const res = await fetch('/api/hubspot?action=authurl', { headers: { Authorization: `Bearer ${state.token}` } });
+    const { url } = await res.json();
+    window.open(url, '_blank');
+  } catch { toast('Failed to get auth URL', 'error'); }
 }
 
 async function saveOrgResources() {
