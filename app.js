@@ -980,9 +980,11 @@ async function _hsSearch(filterGroups, viewName, viewId, loadingMsg) {
     const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify(body) });
     const data = await res.json();
     const results = data.results || [];
-    await enrichHsResultsWithContactPhones(results);
     state._hsSearchAfter = data.paging?.next?.after || null;
     renderHubSpotViewCompanies(results, viewName, viewId, false);
+    enrichHsResultsWithContactPhones(results).then(() => {
+      if (document.getElementById('hs-view-companies')) renderHubSpotViewCompanies(results, viewName, viewId, false);
+    }).catch(() => {});
   } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
 }
 
@@ -994,9 +996,16 @@ async function loadMoreHsResults() {
     const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ ...state._hsSearchBody, after: state._hsSearchAfter }) });
     const data = await res.json();
     const results = data.results || [];
-    await enrichHsResultsWithContactPhones(results);
     state._hsSearchAfter = data.paging?.next?.after || null;
     renderHubSpotViewCompanies(results, state._hsActiveViewName, state._hsActiveView, true);
+    enrichHsResultsWithContactPhones(results).then(() => {
+      results.forEach(r => {
+        if (r.properties?.contactPhone && state._hsViewCompanies) {
+          const c = state._hsViewCompanies.find(c => c.id === r.id);
+          if (c) c.phone = r.properties.contactPhone;
+        }
+      });
+    }).catch(() => {});
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Load more'; } }
 }
 
