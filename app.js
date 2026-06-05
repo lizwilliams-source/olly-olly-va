@@ -148,20 +148,44 @@ async function loadContacts(after = null) {
     if (data.results) {
       const enriched = data.results.map(enrichContact);
       if (after) { state.contacts = [...state.contacts, ...enriched]; }
-      else { state.contacts = enriched; }
+      else { state.contacts = enriched; enrichContactPhones(); }
       state.hsConnected = true;
       updateHsStatus(true);
       updateBadges();
       if (state.currentView === 'contacts') renderContacts();
-      // Paginate if more exist
-      if (data.paging?.next?.after) {
-        loadContacts(data.paging.next.after);
-      }
+      if (data.paging?.next?.after) loadContacts(data.paging.next.after);
     } else if (!after) {
       console.error('HubSpot search error:', data);
       updateHsStatus(false);
     }
   } catch (e) { console.error('Failed to load companies:', e); updateHsStatus(false); }
+}
+
+async function enrichContactPhones() {
+  try {
+    const companyIds = state.contacts.map(c => c.id);
+    if (!companyIds.length) return;
+    // Batch fetch contact associations for all companies
+    const assocRes = await hsPost('/crm/v4/associations/companies/contacts/batch/read', {
+      inputs: companyIds.slice(0, 100).map(id => ({ id }))
+    });
+    if (!assocRes.results?.length) return;
+    const contactMap = {};
+    assocRes.results.forEach(r => { if (r.to?.length) contactMap[r.from.id] = r.to[0].toObjectId; });
+    const contactIds = [...new Set(Object.values(contactMap))];
+    if (!contactIds.length) return;
+    const phoneRes = await hsPost('/crm/v3/objects/contacts/batch/read', {
+      inputs: contactIds.map(id => ({ id })), properties: ['phone', 'mobilephone']
+    });
+    const phoneMap = {};
+    (phoneRes.results || []).forEach(c => { phoneMap[c.id] = c.properties.mobilephone || c.properties.phone || null; });
+    let updated = false;
+    state.contacts.forEach(c => {
+      const cid = contactMap[c.id];
+      if (cid && phoneMap[cid] && !c.phone) { c.phone = phoneMap[cid]; updated = true; }
+    });
+    if (updated && state.currentView === 'contacts') renderContacts();
+  } catch {}
 }
 
 function updateQueueBadge() {
@@ -369,6 +393,7 @@ function showView(view) {
     contacts: renderContacts,
     myqueue: renderMyQueue,
     pipeline: renderPipeline,
+    hubspotviews: renderHubSpotViews,
     ai: renderAI,
     admin: renderAdmin,
     nevercalled: () => renderPriorityView('nevercalled', '📵 Never Called By Me'),
@@ -772,6 +797,170 @@ function leadCardHTML(c) {
 }
 
 // ── MY QUEUE ──────────────────────────────────────────────────────────────────
+// ─── HUBSPOT VIEWS ────────────────────────────────────────────────────────────
+state._hsViews = null;
+state._hsViewCompanies = null;
+state._hsActiveView = null;
+
+async function renderHubSpotViews() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-left"><h2>🔭 HubSpot Views</h2><p>Browse saved HubSpot views and add companies to your queue</p></div>
+    </div>
+    <div class="content">
+      <div style="display:grid;grid-template-columns:220px 1fr;gap:16px;align-items:start">
+        <div id="hs-views-sidebar" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">Views</div>
+          <div id="hs-views-list" style="padding:8px 0"><div style="padding:8px 12px;font-size:13px;color:var(--text3)">Loading...</div></div>
+        </div>
+        <div id="hs-view-companies">
+          <div style="text-align:center;padding:60px 20px;color:var(--text2)"><div style="font-size:32px;margin-bottom:12px">🔭</div><div style="font-size:14px">Select a view on the left</div></div>
+        </div>
+      </div>
+    </div>`;
+
+  // Fetch views — try the CRM views endpoint first, fall back to lists
+  if (!state._hsViews) {
+    try {
+      const res = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/objects/companies/views', Authorization: `Bearer ${state.token}` } });
+      const data = await res.json();
+      state._hsViews = data.results || data.views || null;
+    } catch {}
+
+    // Fallback: HubSpot CRM lists filtered to companies
+    if (!state._hsViews) {
+      try {
+        const res = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/lists?objectTypeId=0-2&count=100', Authorization: `Bearer ${state.token}` } });
+        const data = await res.json();
+        state._hsViews = (data.lists || data.results || []).map(l => ({ id: l.listId || l.id, name: l.name, type: 'list', size: l.metaData?.size ?? null }));
+      } catch {}
+    }
+  }
+
+  const viewsList = document.getElementById('hs-views-list');
+  if (!state._hsViews?.length) {
+    viewsList.innerHTML = `<div style="padding:10px 12px;font-size:12px;color:var(--text3)">No views found. Check HubSpot API scopes.</div>`;
+    return;
+  }
+
+  viewsList.innerHTML = state._hsViews.map(v => `
+    <div onclick="loadHubSpotView('${v.id}','${(v.name||'').replace(/'/g,"\\'")}')"
+      style="padding:9px 12px;cursor:pointer;font-size:13px;color:var(--text);border-left:3px solid transparent;transition:all .1s"
+      id="hs-view-item-${v.id}"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=state._hsActiveView==='${v.id}'?'var(--bg3)':''">
+      ${v.name}${v.size != null ? `<span style="font-size:10px;color:var(--text3);margin-left:6px">${v.size}</span>` : ''}
+    </div>`).join('');
+}
+
+async function loadHubSpotView(viewId, viewName) {
+  state._hsActiveView = viewId;
+  // Highlight selected
+  document.querySelectorAll('[id^="hs-view-item-"]').forEach(el => { el.style.background = ''; el.style.borderLeftColor = 'transparent'; });
+  const active = document.getElementById(`hs-view-item-${viewId}`);
+  if (active) { active.style.background = 'var(--bg3)'; active.style.borderLeftColor = 'var(--blue)'; }
+
+  const panel = document.getElementById('hs-view-companies');
+  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading ${viewName}...</div>`;
+
+  try {
+    // Try fetching memberships (for lists)
+    let companyIds = [];
+    const memRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/lists/${viewId}/memberships?limit=100`, Authorization: `Bearer ${state.token}` } });
+    if (memRes.ok) {
+      const memData = await memRes.json();
+      companyIds = (memData.results || memData.inputs || []).map(r => r.recordId || r.id).filter(Boolean);
+    }
+
+    // If no memberships, try it as a view with a search
+    if (!companyIds.length) {
+      const viewRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': `/crm/v3/objects/companies/search`, 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100, viewId }) });
+      if (viewRes.ok) {
+        const viewData = await viewRes.json();
+        renderHubSpotViewCompanies(viewData.results || [], viewName, viewId);
+        return;
+      }
+    }
+
+    if (!companyIds.length) { panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies found in this view.</div>`; return; }
+
+    // Batch read company details
+    const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: companyIds.slice(0, 100).map(id => ({ id })), properties: COMPANY_PROPS }) });
+    const batchData = await batchRes.json();
+    renderHubSpotViewCompanies(batchData.results || [], viewName, viewId);
+  } catch (e) {
+    panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed to load view: ${e.message}</div>`;
+  }
+}
+
+function renderHubSpotViewCompanies(results, viewName, viewId) {
+  const panel = document.getElementById('hs-view-companies');
+  if (!results.length) { panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies in this view.</div>`; return; }
+
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  const inQueue = new Set((activeQueue?.companies || []).map(c => c.id));
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:600;color:var(--text)">${viewName} <span style="font-size:12px;color:var(--text3);font-weight:400">${results.length} companies</span></div>
+      <button class="btn btn-sm btn-primary" onclick="addAllHsViewToQueue()" style="font-size:11px">+ Add all to queue</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px" id="hs-view-company-list">
+      ${results.map(r => {
+        const p = r.properties || {};
+        const id = r.id;
+        const name = p.name || '—';
+        const phone = p.phone || p.contact_phone_number__ || '';
+        const city = p.city || ''; const st = p.state || '';
+        const stage = p.lifecyclestage || p.hs_lead_status || p.subscription_status || '';
+        const already = inQueue.has(id);
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius)">
+          <div style="flex:1;min-width:0;cursor:pointer" onclick="openContact('${id}')">
+            <div style="font-size:13px;font-weight:600;color:var(--text)">${name}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${[phone, [city,st].filter(Boolean).join(', '), stage].filter(Boolean).join(' · ')}</div>
+          </div>
+          <button class="btn btn-sm ${already ? '' : 'btn-primary'}" style="flex-shrink:0;font-size:11px${already ? ';color:var(--text3)' : ''}"
+            onclick="addHsCompanyToQueue('${id}','${name.replace(/'/g,"\\'")}','${phone.replace(/'/g,"\\'")}',this)" ${already ? 'disabled' : ''}>
+            ${already ? '✓ In queue' : '+ Queue'}
+          </button>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  // Store for bulk add
+  state._hsViewCompanies = results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.phone || r.properties?.contact_phone_number__ || '' }));
+}
+
+function addHsCompanyToQueue(id, name, phone, btn) {
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  if (!activeQueue) { toast('No active queue', 'error'); return; }
+  if (activeQueue.companies.find(c => c.id === id)) return;
+  activeQueue.companies.push({ id, name, phone });
+  fetch('/api/users?action=reorderqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId: activeQueue.id, companies: activeQueue.companies }) }).catch(() => {});
+  if (btn) { btn.textContent = '✓ In queue'; btn.disabled = true; btn.className = 'btn btn-sm'; btn.style.color = 'var(--text3)'; }
+  const badge = document.getElementById('badge-queue');
+  if (badge) badge.textContent = state.queues.reduce((s, q) => s + q.companies.length, 0);
+  toast(`${name} added to queue ✓`, 'success');
+}
+
+async function addAllHsViewToQueue() {
+  const companies = state._hsViewCompanies || [];
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  if (!activeQueue) { toast('No active queue', 'error'); return; }
+  const existing = new Set(activeQueue.companies.map(c => c.id));
+  let added = 0;
+  companies.forEach(c => { if (!existing.has(c.id)) { activeQueue.companies.push(c); added++; } });
+  if (added) {
+    await fetch('/api/users?action=reorderqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId: activeQueue.id, companies: activeQueue.companies }) }).catch(() => {});
+    const badge = document.getElementById('badge-queue');
+    if (badge) badge.textContent = state.queues.reduce((s, q) => s + q.companies.length, 0);
+    toast(`${added} companies added to queue ✓`, 'success');
+    renderHubSpotViewCompanies(state._hsViewCompanies.map(c => ({ id: c.id, properties: { name: c.name, phone: c.phone } })), state._hsActiveView, state._hsActiveView);
+  } else {
+    toast('All already in queue', 'success');
+  }
+}
+
 async function renderMyQueue() {
   const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
   const companies = activeQueue?.companies || [];
