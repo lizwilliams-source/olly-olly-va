@@ -983,6 +983,12 @@ async function _hsSearch(filterGroups, viewName, viewId, loadingMsg) {
     state._hsSearchAfter = data.paging?.next?.after || null;
     renderHubSpotViewCompanies(results, viewName, viewId, false);
     enrichHsResultsWithContactPhones(results).then(() => {
+      results.forEach(r => {
+        if (r.properties?.contactPhone && state._hsViewCompanies) {
+          const c = state._hsViewCompanies.find(c => c.id === r.id);
+          if (c) c.phone = r.properties.contactPhone;
+        }
+      });
       if (document.getElementById('hs-view-companies')) renderHubSpotViewCompanies(results, viewName, viewId, false);
     }).catch(() => {});
   } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
@@ -1099,7 +1105,11 @@ function addHsCompanyToQueue(id, name, phone, btn) {
   const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
   if (!activeQueue) { toast('No active queue', 'error'); return; }
   if (activeQueue.companies.find(c => c.id === id)) return;
-  activeQueue.companies.push({ id, name, phone });
+  // Prefer enriched contact phone from main contacts list or _hsViewCompanies
+  const resolvedPhone = state.contacts?.find(c => c.id === id)?.phone
+    || state._hsViewCompanies?.find(c => c.id === id)?.phone
+    || phone;
+  activeQueue.companies.push({ id, name, phone: resolvedPhone });
   fetch('/api/users?action=reorderqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId: activeQueue.id, companies: activeQueue.companies }) }).catch(() => {});
   if (btn) { btn.textContent = '✓ In queue'; btn.disabled = true; btn.className = 'btn btn-sm'; btn.style.color = 'var(--text3)'; }
   const badge = document.getElementById('badge-queue');
