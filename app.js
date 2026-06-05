@@ -2575,7 +2575,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
             <div class="field-label" style="margin-bottom:4px">Meeting date & time</div>
             <input id="invite-datetime" type="datetime-local" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
           </div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Event title: <strong style="color:var(--text)">Meeting with ${c?.name?.split(' ')[0] || '[FirstName]'}</strong> · Description uses your template from Settings</div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Event title: <strong style="color:var(--text)">Meeting with ${state.user?.name?.split(' ')[0] || 'You'}</strong> · Description uses your template from Settings</div>
           <button class="btn btn-sm" style="width:100%;justify-content:center;background:var(--blue-dim);border-color:rgba(79,142,247,.3);color:var(--blue)" onclick="sendClientCalendarInvite('${companyId}')">📅 Send invite to prospect</button>
           <div id="invite-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
         </div>
@@ -2822,8 +2822,8 @@ async function sendClientCalendarInvite(companyId) {
   if (!email) { if (msg) msg.style.color = 'var(--red)', msg.textContent = 'Enter prospect email'; return; }
   if (!dt) { if (msg) msg.style.color = 'var(--red)', msg.textContent = 'Pick a meeting date & time'; return; }
   const c = state.contacts.find(x => x.id === companyId);
-  const firstName = c?.name?.split(' ')[0] || '';
-  const title = `Meeting with ${firstName}`;
+  const repFirstName = state.user?.name?.split(' ')[0] || 'Me';
+  const title = `Meeting with ${repFirstName}`;
   const template = state.orgSettings?.calendarInviteTemplate || 'Hi [FirstName],\n\nLooking forward to connecting with you!\n\nBest,\n{{repName}}';
   const description = applyInviteTemplate(template, c).replace('{{repName}}', state.user?.name || '');
   const startTime = new Date(dt).toISOString();
