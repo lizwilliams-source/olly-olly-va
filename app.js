@@ -3394,9 +3394,7 @@ async function renderDialerView() {
   const ta = 'width:100%;min-height:60px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical';
   const field = (label, value, extra = '') => value ? `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:11px;color:var(--text3);flex-shrink:0;margin-right:8px">${label}</span><span style="font-size:12px;color:var(--text);text-align:right">${extra || value}</span></div>` : '';
 
-  const rightPanel = `
-    <div style="width:320px;flex-shrink:0;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden">
-      ${co ? `
+  const rightPanelInner = co ? `
       <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px">
         <div style="min-width:0">
           <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${co.name}</div>
@@ -3441,8 +3439,19 @@ async function renderDialerView() {
         <textarea id="dialer-note-input" placeholder="Quick note..." style="${ta}"></textarea>
         <button class="btn btn-primary btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="saveDialerNote('${co.id}')">Save note</button>
       </div>` : `
-      <div style="padding:20px;font-size:13px;color:var(--text3);text-align:center;margin-top:40px">Queue is empty.<br><br>Add companies from HS Views.</div>`}
-    </div>`;
+      <div style="padding:20px;font-size:13px;color:var(--text3);text-align:center;margin-top:40px">Queue is empty.<br><br>Add companies from HS Views.</div>`;
+
+  // If iframe already exists, only update the right panel — don't reload the iframe
+  const existingFrame = document.getElementById('aloware-frame');
+  if (existingFrame) {
+    const rp = document.getElementById('dialer-right-panel');
+    if (rp) rp.innerHTML = rightPanelInner;
+    const topbarP = document.querySelector('#main .topbar-left p');
+    if (topbarP) topbarP.innerHTML = co ? `<span style="font-weight:600;color:var(--text)">${co.name}${co.phone ? ' · '+co.phone : ''}</span>` : 'Aloware';
+    updateDialerOverlay();
+    if (co?.id) loadQueueNotes(co.id, 'dialer-notes-list');
+    return;
+  }
 
   main.innerHTML = `
     <div class="topbar">
@@ -3468,7 +3477,7 @@ async function renderDialerView() {
           </div>
         </div>
       </div>
-      ${rightPanel}
+      <div id="dialer-right-panel" style="width:320px;flex-shrink:0;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden">${rightPanelInner}</div>
     </div>`;
 
   updateDialerOverlay();
