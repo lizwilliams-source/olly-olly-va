@@ -802,17 +802,25 @@ state._hsViews = null;
 state._hsViewCompanies = null;
 state._hsActiveView = null;
 
-const HS_FILTER_PROPS = [
-  { label: 'Stage',        prop: 'subscription_status', type: 'enum', values: ['Demo Set','Demo Completed','Contract Sent','Contract Revision','Customer','Lead','MQL','SQL','Opportunity','Other'] },
-  { label: 'Lead Source',  prop: 'lead_source',         type: 'enum', values: ['OFFLINE','ORGANIC_SEARCH','PAID_SEARCH','EMAIL_MARKETING','SOCIAL_MEDIA','REFERRALS','OTHER_CAMPAIGNS','DIRECT_TRAFFIC','PAID_SOCIAL'] },
-  { label: 'Timezone',     prop: 'timezone_',           type: 'text' },
-  { label: 'State',        prop: 'state',               type: 'text' },
-  { label: 'City',         prop: 'city',                type: 'text' },
-  { label: 'Industry',     prop: 'industry',            type: 'text' },
-  { label: 'Owner',        prop: 'hubspot_owner_id',    type: 'owner' },
-  { label: 'Never Called', prop: 'recent_user_to_call', type: 'special' },
-  { label: 'Last Contact', prop: 'notes_last_contacted', type: 'date' },
-];
+state._hsProps = null;
+
+async function loadHsProperties() {
+  if (state._hsProps) return state._hsProps;
+  try {
+    const res = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/companies?limit=500', Authorization: `Bearer ${state.token}` } });
+    const data = await res.json();
+    state._hsProps = (data.results || [])
+      .filter(p => !p.hidden && !p.calculated)
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(p => ({
+        label: p.label,
+        prop: p.name,
+        type: p.fieldType === 'select' || p.fieldType === 'checkbox' || p.fieldType === 'booleancheckbox' ? 'enum' : p.fieldType === 'date' || p.fieldType === 'datetime' ? 'date' : 'text',
+        values: (p.options || []).map(o => ({ label: o.label, value: o.value })),
+      }));
+  } catch {}
+  return state._hsProps || [];
+}
 
 async function renderHubSpotViews() {
   const main = document.getElementById('main');
@@ -824,13 +832,14 @@ async function renderHubSpotViews() {
     <div class="content" style="max-width:960px">
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
         <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px">Build a filter</div>
-        <div id="hs-filter-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+        <div id="hs-filter-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
+          <div style="font-size:12px;color:var(--text3)">Loading properties...</div>
+        </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-sm" onclick="addHsFilterRow()">+ Add filter</button>
           <button class="btn btn-primary" onclick="runHsFilter()">Search →</button>
           <span style="font-size:11px;color:var(--text3);margin-left:4px">All filters combined with AND</span>
         </div>
-
         <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
           <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Quick views</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px">
@@ -847,47 +856,78 @@ async function renderHubSpotViews() {
       </div>
     </div>`;
 
+  await loadHsProperties();
+  document.getElementById('hs-filter-rows').innerHTML = '';
   addHsFilterRow();
 }
 
 function addHsFilterRow() {
   const container = document.getElementById('hs-filter-rows');
   const idx = container.children.length;
-  const sel = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none';
+  const props = state._hsProps || [];
+  const s = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none';
   const div = document.createElement('div');
   div.id = `hs-filter-row-${idx}`;
-  div.style.cssText = 'display:flex;gap:8px;align-items:center';
+  div.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
   div.innerHTML = `
-    <select id="hs-fp-${idx}" onchange="updateHsFilterRow(${idx})" style="${sel}">
-      ${HS_FILTER_PROPS.map(p => `<option value="${p.prop}">${p.label}</option>`).join('')}
-    </select>
-    <select id="hs-fo-${idx}" style="${sel}">
+    <input id="hs-fp-search-${idx}" placeholder="Search property..." style="${s};width:200px" oninput="filterHsPropOptions(${idx})" onfocus="document.getElementById('hs-fp-dd-${idx}').style.display='block'" />
+    <div id="hs-fp-dd-${idx}" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;max-height:200px;overflow-y:auto;z-index:50;min-width:220px;box-shadow:0 4px 12px rgba(0,0,0,.3)">
+      ${props.map(p => `<div class="hs-prop-opt" data-idx="${idx}" data-prop="${p.prop}" data-label="${p.label.replace(/"/g,'&quot;')}" onclick="selectHsProp(${idx},'${p.prop}','${p.label.replace(/'/g,"\\'")}' )" style="padding:7px 12px;cursor:pointer;font-size:13px;color:var(--text)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">${p.label} <span style="font-size:10px;color:var(--text3)">${p.prop}</span></div>`).join('')}
+    </div>
+    <input id="hs-fp-${idx}" type="hidden" value="" />
+    <select id="hs-fo-${idx}" style="${s}">
       <option value="EQ">equals</option>
       <option value="NEQ">not equals</option>
       <option value="CONTAINS_TOKEN">contains</option>
+      <option value="IN">is any of</option>
+      <option value="NOT_IN">is none of</option>
+      <option value="GT">greater than</option>
+      <option value="LT">less than</option>
       <option value="HAS_PROPERTY">has value</option>
       <option value="NOT_HAS_PROPERTY">is empty</option>
     </select>
-    <div id="hs-fv-wrap-${idx}" style="flex:1"><input id="hs-fv-${idx}" placeholder="value" style="${sel};width:100%" /></div>
-    <button onclick="document.getElementById('hs-filter-row-${idx}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:0 4px">×</button>`;
+    <div id="hs-fv-wrap-${idx}" style="flex:1;min-width:120px"><input id="hs-fv-${idx}" placeholder="value" style="${s};width:100%" /></div>
+    <button onclick="document.getElementById('hs-filter-row-${idx}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;padding:0 4px;flex-shrink:0">×</button>`;
   container.appendChild(div);
+  // Close dropdown on outside click
+  document.addEventListener('click', function closeDD(e) {
+    const dd = document.getElementById(`hs-fp-dd-${idx}`);
+    if (dd && !dd.contains(e.target) && e.target.id !== `hs-fp-search-${idx}`) { dd.style.display = 'none'; }
+  }, { once: false, capture: true });
+}
+
+function filterHsPropOptions(idx) {
+  const q = document.getElementById(`hs-fp-search-${idx}`)?.value.toLowerCase() || '';
+  const dd = document.getElementById(`hs-fp-dd-${idx}`);
+  if (!dd) return;
+  dd.style.display = 'block';
+  dd.querySelectorAll('.hs-prop-opt').forEach(el => {
+    el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function selectHsProp(idx, prop, label) {
+  const hiddenInput = document.getElementById(`hs-fp-${idx}`);
+  const searchInput = document.getElementById(`hs-fp-search-${idx}`);
+  const dd = document.getElementById(`hs-fp-dd-${idx}`);
+  if (hiddenInput) hiddenInput.value = prop;
+  if (searchInput) searchInput.value = label;
+  if (dd) dd.style.display = 'none';
   updateHsFilterRow(idx);
 }
 
 function updateHsFilterRow(idx) {
-  const propSel = document.getElementById(`hs-fp-${idx}`);
+  const prop = document.getElementById(`hs-fp-${idx}`)?.value;
   const valWrap = document.getElementById(`hs-fv-wrap-${idx}`);
-  if (!propSel || !valWrap) return;
-  const def = HS_FILTER_PROPS.find(p => p.prop === propSel.value);
-  const sel = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;width:100%';
-  if (def?.type === 'enum') {
-    valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${sel}">${def.values.map(v => `<option>${v}</option>`).join('')}</select>`;
-  } else if (def?.type === 'owner') {
-    valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${sel}"><option value="${state.ownerId}">Me</option></select>`;
-  } else if (def?.type === 'special') {
-    valWrap.innerHTML = `<span style="font-size:12px;color:var(--text3)">(no value needed)</span><input id="hs-fv-${idx}" type="hidden" value="" />`;
+  if (!prop || !valWrap) return;
+  const def = (state._hsProps || []).find(p => p.prop === prop);
+  const s = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;width:100%';
+  if (def?.type === 'enum' && def.values?.length) {
+    valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${s}">${def.values.map(v => `<option value="${v.value}">${v.label}</option>`).join('')}</select>`;
+  } else if (def?.type === 'date') {
+    valWrap.innerHTML = `<input id="hs-fv-${idx}" type="date" style="${s}" />`;
   } else {
-    valWrap.innerHTML = `<input id="hs-fv-${idx}" placeholder="value" style="${sel}" />`;
+    valWrap.innerHTML = `<input id="hs-fv-${idx}" placeholder="value" style="${s}" />`;
   }
 }
 
@@ -900,11 +940,7 @@ async function runHsFilter() {
     const op = document.getElementById(`hs-fo-${idx}`)?.value;
     const val = document.getElementById(`hs-fv-${idx}`)?.value;
     if (!prop || !op) continue;
-    const def = HS_FILTER_PROPS.find(p => p.prop === prop);
-    if (def?.type === 'special' && prop === 'recent_user_to_call') {
-      filters.push({ propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] });
-      filters.push({ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId });
-    } else if (op === 'HAS_PROPERTY' || op === 'NOT_HAS_PROPERTY') {
+    if (op === 'HAS_PROPERTY' || op === 'NOT_HAS_PROPERTY') {
       filters.push({ propertyName: prop, operator: op });
     } else if (val) {
       filters.push({ propertyName: prop, operator: op, value: val });
