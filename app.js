@@ -1307,6 +1307,7 @@ async function renderMyQueue() {
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between">
             <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="removeFromQueue('${c.id}','${activeQueue.id}')">Remove</button>
+            <button class="btn btn-sm" onclick="openSetDemoNotes('${c.id}')" style="color:var(--green);border-color:rgba(62,207,142,.3)">🎯 Set demo</button>
             <button class="btn btn-sm" onclick="openContact('${c.id}')" ${!contact ? 'disabled title="Not in your contacts list"' : ''}>View full profile</button>
           </div>`}
     </div>`;
@@ -2017,6 +2018,7 @@ async function openContact(id) {
     </button>
     <button class="btn btn-sm" onclick="openEmailCompose('${id}')">✉️ Send email</button>
     <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
+    <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openSetDemoNotes('${id}')">🎯 Set Demo</button>
 `;
   document.getElementById('modal').style.display = 'flex';
 }
@@ -2195,6 +2197,19 @@ if (window.location.search.includes('calendar=connected')) {
 }
 
 // ─── CALL LOGGING MODAL ───────────────────────────────────────────────────────
+function openSetDemoNotes(companyId) {
+  const c = state.contacts.find(x => x.id === companyId)
+    || state.queues.flatMap(q => q.companies).find(c => c.id === companyId)
+    || state._hsViewCompanies?.find(c => c.id === companyId)
+    || { id: companyId, name: companyId };
+  state.selectedCallType = 'demo';
+  document.getElementById('modal-title').innerHTML = `🎯 Set Demo Notes — ${c.name}`;
+  document.getElementById('modal-body').innerHTML = `<div id="call-logger-content"></div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
+  document.getElementById('modal').style.display = 'flex';
+  showCallAnalysis(companyId, '', { demoNotes: {}, interested: null, sentiment: null });
+}
+
 async function openCallLogger(companyId) {
   const c = state.contacts.find(x => x.id === companyId)
     || state.queues.flatMap(q => q.companies).find(c => c.id === companyId)
@@ -3524,6 +3539,7 @@ async function renderDialerView() {
       </div>
       <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" onclick="openCallLogger('${co.id}')" style="font-size:11px">📝 Log call</button>
+        <button class="btn btn-sm" onclick="openSetDemoNotes('${co.id}')" style="font-size:11px;color:var(--green);border-color:rgba(62,207,142,.3)">🎯 Set demo</button>
         <button class="btn btn-sm" onclick="openEmailCompose('${co.id}')" style="font-size:11px">✉️ Email</button>
         <a href="https://app.hubspot.com/contacts/45530742/company/${co.id}" target="_blank" class="btn btn-sm" style="font-size:11px;text-decoration:none">HS ↗</a>
         <a href="https://www.google.com/search?q=${encodeURIComponent(co.name)}" target="_blank" class="btn btn-sm" style="font-size:11px;text-decoration:none">🔍 Google</a>
