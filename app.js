@@ -2924,29 +2924,30 @@ async function sendClientCalendarInvite(companyId) {
 
 async function loadDealStages() {
   const sel = document.getElementById('deal-stage');
-  if (!sel) return;
+  const typeSel = document.getElementById('deal-type');
+  if (!sel && !typeSel) return;
   try {
     if (!state._hsDealStages) {
-      const [pipeRes, typeRes] = await Promise.all([
-        fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/pipelines/deals', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
+      const [stageRes, typeRes] = await Promise.all([
+        fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/deals/dealstage', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
         fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/deals/dealtype', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
       ]);
-      state._hsDealStages = (pipeRes.results || []).flatMap(p => (p.stages || []).map(s => ({ id: s.id, label: `${p.label} → ${s.label}` })));
-      state._hsDealTypes = (typeRes.options || []).map(o => ({ value: o.value, label: o.label }));
+      state._hsDealStages = (stageRes.options || []).filter(o => !o.hidden).map(o => ({ id: o.value, label: o.label }));
+      state._hsDealTypes = (typeRes.options || []).filter(o => !o.hidden).map(o => ({ value: o.value, label: o.label }));
     }
-    const stages = state._hsDealStages;
-    sel.innerHTML = stages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
-    // Auto-select "Demo Set" stage
-    const demoSet = stages.find(s => s.label.toLowerCase().includes('demo set'));
-    if (demoSet) sel.value = demoSet.id;
-    // Populate deal type dropdown
-    const typeSel = document.getElementById('deal-type');
-    if (typeSel && state._hsDealTypes?.length) {
+    if (sel && state._hsDealStages.length) {
+      sel.innerHTML = state._hsDealStages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
+      const demoSet = state._hsDealStages.find(s => s.label.toLowerCase().includes('demo set'));
+      if (demoSet) sel.value = demoSet.id;
+    }
+    if (typeSel && state._hsDealTypes.length) {
       typeSel.innerHTML = state._hsDealTypes.map(t => `<option value="${t.value}">${t.label}</option>`).join('');
       const master = state._hsDealTypes.find(t => t.label.toLowerCase().includes('master'));
       if (master) typeSel.value = master.value;
     }
-  } catch { if (sel) sel.innerHTML = '<option value="">Could not load stages</option>'; }
+  } catch (e) {
+    if (sel) sel.innerHTML = `<option value="">Error: ${e.message}</option>`;
+  }
 }
 
 async function createHubSpotDeal(companyId) {
