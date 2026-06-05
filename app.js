@@ -223,6 +223,17 @@ function findCompanyQueue(companyId) {
   return state.queues.find(q => q.companies.find(c => c.id === companyId)) || null;
 }
 
+function saveQueueIdx() {
+  if (state.activeQueueId) localStorage.setItem(`queue_idx_${state.activeQueueId}`, String(state._queueIdx || 0));
+}
+
+function restoreQueueIdx() {
+  if (state.activeQueueId) {
+    const saved = localStorage.getItem(`queue_idx_${state.activeQueueId}`);
+    if (saved !== null) state._queueIdx = parseInt(saved) || 0;
+  }
+}
+
 async function loadQueue() {
   try {
     const res = await fetch('/api/users?action=getqueues', { headers: { Authorization: `Bearer ${state.token}` } });
@@ -232,6 +243,7 @@ async function loadQueue() {
       if (!state.activeQueueId || !state.queues.find(q => q.id === state.activeQueueId)) {
         state.activeQueueId = state.queues[0]?.id || null;
       }
+      restoreQueueIdx();
       updateQueueBadge();
     }
   } catch (e) { console.error('Failed to load queues:', e); }
@@ -316,7 +328,7 @@ async function clearQueue(queueId) {
 
 function switchQueue(queueId) {
   state.activeQueueId = queueId;
-  state._queueIdx = 0;
+  restoreQueueIdx();
   renderMyQueue();
 }
 
@@ -1306,6 +1318,7 @@ function queueNav(dir) {
   const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
   if (!activeQueue) return;
   state._queueIdx = Math.max(0, Math.min((state._queueIdx || 0) + dir, activeQueue.companies.length - 1));
+  saveQueueIdx();
   renderMyQueue();
 }
 
@@ -3489,6 +3502,7 @@ function dialerNav(dir) {
   const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
   if (!activeQueue) return;
   state._queueIdx = Math.max(0, Math.min((state._queueIdx || 0) + dir, activeQueue.companies.length - 1));
+  saveQueueIdx();
   renderDialerView();
 }
 
