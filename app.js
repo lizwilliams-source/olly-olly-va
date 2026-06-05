@@ -186,6 +186,30 @@ async function enrichContactPhones() {
     });
     if (updated && state.currentView === 'contacts') renderContacts();
   } catch {}
+  backfillQueuePhones();
+}
+
+async function backfillQueuePhones() {
+  try {
+    const allQueuedIds = [...new Set(state.queues.flatMap(q => q.companies.map(c => c.id)))];
+    if (!allQueuedIds.length) return;
+    const fakeResults = allQueuedIds.map(id => ({ id, properties: {} }));
+    await enrichHsResultsWithContactPhones(fakeResults);
+    const phoneById = {};
+    fakeResults.forEach(r => { if (r.properties?.contactPhone) phoneById[r.id] = r.properties.contactPhone; });
+    if (!Object.keys(phoneById).length) return;
+    const dirtyQueueIds = new Set();
+    state.queues.forEach(q => {
+      q.companies.forEach(c => {
+        if (phoneById[c.id] && c.phone !== phoneById[c.id]) { c.phone = phoneById[c.id]; dirtyQueueIds.add(q.id); }
+      });
+    });
+    dirtyQueueIds.forEach(queueId => {
+      const q = state.queues.find(q => q.id === queueId);
+      if (q) fetch('/api/users?action=reorderqueue', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ queueId, companies: q.companies }) }).catch(() => {});
+    });
+    if (dirtyQueueIds.size && state.currentView === 'myqueue') renderMyQueue();
+  } catch {}
 }
 
 function updateQueueBadge() {
