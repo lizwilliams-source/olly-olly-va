@@ -2627,6 +2627,10 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
             <div class="field-label" style="margin-bottom:4px">Stage</div>
             <select id="deal-stage" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none"><option value="">Loading stages...</option></select>
           </div>
+          <div style="margin-bottom:8px">
+            <div class="field-label" style="margin-bottom:4px">Deal type</div>
+            <select id="deal-type" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none"><option value="">Loading...</option></select>
+          </div>
           <div style="margin-bottom:10px">
             <div class="field-label" style="margin-bottom:4px">Amount (optional)</div>
             <input id="deal-amount" type="number" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
@@ -2897,33 +2901,57 @@ async function sendClientCalendarInvite(companyId) {
 async function loadDealStages() {
   const sel = document.getElementById('deal-stage');
   if (!sel) return;
-  if (state._hsDealStages) {
-    sel.innerHTML = state._hsDealStages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
-    return;
-  }
   try {
-    const res = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/pipelines/deals', Authorization: `Bearer ${state.token}` } });
-    const data = await res.json();
-    const stages = (data.results || []).flatMap(p => (p.stages || []).map(s => ({ id: s.id, label: `${p.label} → ${s.label}` })));
-    state._hsDealStages = stages;
-    if (sel) sel.innerHTML = stages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
+    if (!state._hsDealStages) {
+      const [pipeRes, typeRes] = await Promise.all([
+        fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/pipelines/deals', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
+        fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/deals/dealtype', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
+      ]);
+      state._hsDealStages = (pipeRes.results || []).flatMap(p => (p.stages || []).map(s => ({ id: s.id, label: `${p.label} → ${s.label}` })));
+      state._hsDealTypes = (typeRes.options || []).map(o => ({ value: o.value, label: o.label }));
+    }
+    const stages = state._hsDealStages;
+    sel.innerHTML = stages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
+    // Auto-select "Demo Set" stage
+    const demoSet = stages.find(s => s.label.toLowerCase().includes('demo set'));
+    if (demoSet) sel.value = demoSet.id;
+    // Populate deal type dropdown
+    const typeSel = document.getElementById('deal-type');
+    if (typeSel && state._hsDealTypes?.length) {
+      typeSel.innerHTML = state._hsDealTypes.map(t => `<option value="${t.value}">${t.label}</option>`).join('');
+      const master = state._hsDealTypes.find(t => t.label.toLowerCase().includes('master'));
+      if (master) typeSel.value = master.value;
+    }
   } catch { if (sel) sel.innerHTML = '<option value="">Could not load stages</option>'; }
 }
 
 async function createHubSpotDeal(companyId) {
   const name = document.getElementById('deal-name')?.value.trim();
   const stage = document.getElementById('deal-stage')?.value;
+  const dealtype = document.getElementById('deal-type')?.value;
   const amount = document.getElementById('deal-amount')?.value.trim();
   const msg = document.getElementById('deal-msg');
   if (!name) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Enter a deal name'; } return; }
   if (!stage) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Select a stage'; } return; }
+  if (msg) { msg.style.color = 'var(--text3)'; msg.textContent = 'Creating...'; }
   try {
+    // Fetch primary contact to associate
+    let contactId = null;
+    try {
+      const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } });
+      const assocData = await assocRes.json();
+      contactId = assocData.results?.[0]?.id || null;
+    } catch {}
+    const associations = [
+      { to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 5 }] },
+      ...(contactId ? [{ to: { id: contactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 3 }] }] : []),
+    ];
     const data = await hsPost('/crm/v3/objects/deals', {
-      properties: { dealname: name, dealstage: stage, hubspot_owner_id: state.ownerId, ...(amount ? { amount } : {}) },
-      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 5 }] }],
+      properties: { dealname: name, dealstage: stage, hubspot_owner_id: state.ownerId, ...(dealtype ? { dealtype } : {}), ...(amount ? { amount } : {}) },
+      associations,
     });
     if (data.id) {
-      if (msg) { msg.style.color = 'var(--green)'; msg.textContent = '✓ Deal created in HubSpot!'; }
+      if (msg) { msg.style.color = 'var(--green)'; msg.textContent = `✓ Deal created${contactId ? ' + contact linked' : ''}!`; }
       toast('💼 Deal created ✓', 'success');
     } else {
       const err = data.message || data.error || JSON.stringify(data);
