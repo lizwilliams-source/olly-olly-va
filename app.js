@@ -1309,8 +1309,8 @@ function queueNav(dir) {
   renderMyQueue();
 }
 
-async function loadQueueNotes(companyId) {
-  const area = document.getElementById('queue-notes-area');
+async function loadQueueNotes(companyId, targetId = 'queue-notes-area') {
+  const area = document.getElementById(targetId);
   if (!area) return;
   const notes = [];
   try {
@@ -1335,8 +1335,8 @@ async function loadQueueNotes(companyId) {
     }
   } catch {}
   notes.sort((a, b) => new Date(b.date) - new Date(a.date));
-  if (!document.getElementById('queue-notes-area')) return;
-  document.getElementById('queue-notes-area').innerHTML = notes.length
+  if (!document.getElementById(targetId)) return;
+  document.getElementById(targetId).innerHTML = notes.length
     ? notes.map(n => `<div style="padding:10px 12px;background:var(--bg3);border-radius:6px;margin-bottom:8px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">${n.date}</div><div style="font-size:13px;color:var(--text);white-space:pre-wrap">${n.text}</div></div>`).join('')
     : '<span style="color:var(--text3)">No notes yet</span>';
 }
@@ -3366,15 +3366,11 @@ function showDemoBlocker(upcoming, onContinue) {
 // ─── DIALER VIEW ──────────────────────────────────────────────────────────────
 async function renderDialerView() {
   const main = document.getElementById('main');
-  const co = state.dialerCompany;
-
-  if (!state.notes) state.notes = {};
-  if (co?.id) {
-    try {
-      const nr = await fetch(`/api/users?action=getnotes&companyId=${co.id}`, { headers: { Authorization: `Bearer ${state.token}` } });
-      if (nr.ok) { const { notes: kv } = await nr.json(); state.notes[co.id] = kv || []; }
-    } catch {}
-  }
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  const queueCompanies = activeQueue?.companies || [];
+  state._queueIdx = Math.min(state._queueIdx || 0, Math.max(0, queueCompanies.length - 1));
+  // dialerCompany overrides queue position (set by openCallLogger); nav clears it
+  const co = state.dialerCompany || queueCompanies[state._queueIdx] || null;
 
   // Fetch associated contacts for this company
   let assocContacts = [];
@@ -3394,31 +3390,36 @@ async function renderDialerView() {
     } catch {}
   }
 
-  const notes = co ? (state.notes?.[co.id] || []) : [];
   const contact = co ? state.contacts.find(c => c.id === co.id) : null;
   const ta = 'width:100%;min-height:60px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical';
-  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
-  const queueCompanies = activeQueue?.companies || [];
-
   const field = (label, value, extra = '') => value ? `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:11px;color:var(--text3);flex-shrink:0;margin-right:8px">${label}</span><span style="font-size:12px;color:var(--text);text-align:right">${extra || value}</span></div>` : '';
 
-  const rightPanel = co ? `
+  const rightPanel = `
     <div style="width:320px;flex-shrink:0;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
-        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:2px">${co.name}</div>
-        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-sm" onclick="openCallLogger('${co.id}')" style="font-size:11px">📝 Log call</button>
-          <button class="btn btn-sm" onclick="openEmailCompose('${co.id}')" style="font-size:11px">✉️ Email</button>
-          <a href="https://app.hubspot.com/contacts/45530742/company/${co.id}" target="_blank" class="btn btn-sm" style="font-size:11px;text-decoration:none">HS ↗</a>
+      ${co ? `
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="min-width:0">
+          <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${co.name}</div>
+          ${queueCompanies.length > 1 && !state.dialerCompany ? `<div style="font-size:11px;color:var(--text3);margin-top:1px">${(state._queueIdx||0)+1} of ${queueCompanies.length}</div>` : ''}
         </div>
+        ${!state.dialerCompany && queueCompanies.length > 1 ? `<div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="btn btn-sm" onclick="dialerNav(-1)" ${(state._queueIdx||0) <= 0 ? 'disabled' : ''} style="padding:3px 8px">←</button>
+          <button class="btn btn-sm" onclick="dialerNav(1)" ${(state._queueIdx||0) >= queueCompanies.length-1 ? 'disabled' : ''} style="padding:3px 8px">→</button>
+        </div>` : ''}
+      </div>
+      <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="openCallLogger('${co.id}')" style="font-size:11px">📝 Log call</button>
+        <button class="btn btn-sm" onclick="openEmailCompose('${co.id}')" style="font-size:11px">✉️ Email</button>
+        <a href="https://app.hubspot.com/contacts/45530742/company/${co.id}" target="_blank" class="btn btn-sm" style="font-size:11px;text-decoration:none">HS ↗</a>
+        <a href="https://www.google.com/search?q=${encodeURIComponent(co.name)}" target="_blank" class="btn btn-sm" style="font-size:11px;text-decoration:none">🔍 Google</a>
       </div>
       <div style="flex:1;overflow-y:auto">
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
-          ${field('Phone', contact?.phone, contact?.phone ? `<a href="tel:${(contact.phone||'').replace(/\D/g,'')}" style="color:var(--green);text-decoration:none;font-weight:600">${contact.phone}</a>` : '')}
+          ${field('Phone', co.phone || contact?.phone, (co.phone||contact?.phone) ? `<a href="tel:${(co.phone||contact?.phone||'').replace(/\D/g,'')}" style="color:var(--green);text-decoration:none;font-weight:600">${co.phone||contact?.phone}</a>` : '')}
           ${field('Location', contact?.city || contact?.state, [contact?.city, contact?.state].filter(Boolean).join(', '))}
           ${field('Timezone', contact?.timezone)}
           ${field('Stage', contact?.masterStage || contact?.stage)}
-          ${field('Score', contact?.score, `<span style="color:var(--${contact?.urgency === 'urgent' ? 'red' : contact?.urgency === 'warm' ? 'amber' : 'blue'})">${contact?.score}/100</span>`)}
+          ${field('Score', contact?.score, contact?.score ? `<span style="color:var(--${contact?.urgency === 'urgent' ? 'red' : contact?.urgency === 'warm' ? 'amber' : 'blue'})">${contact?.score}/100</span>` : '')}
           ${field('Lead Source', contact?.leadSource)}
           ${field('Last Contact', contact?.lastContacted)}
           ${field('Website', contact?.rawProps?.website, contact?.rawProps?.website ? `<a href="${contact.rawProps.website.startsWith('http') ? contact.rawProps.website : 'https://'+contact.rawProps.website}" target="_blank" style="color:var(--blue);text-decoration:none">${contact.rawProps.website}</a>` : '')}
@@ -3433,34 +3434,14 @@ async function renderDialerView() {
         </div>` : ''}
         <div style="padding:10px 16px">
           <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Notes</div>
-          <div id="dialer-notes-list">
-            ${notes.length ? notes.slice(0,15).map(n => `<div style="padding:6px 0;border-bottom:1px solid var(--border)"><div style="font-size:10px;color:var(--text3);margin-bottom:2px">${n.date}${n.type ? ' · '+n.type : ''}</div><div style="font-size:12px;color:var(--text2);line-height:1.5;white-space:pre-wrap">${(n.text||'').slice(0,300)}</div></div>`).join('') : '<div style="font-size:12px;color:var(--text3)">No notes yet</div>'}
-          </div>
+          <div id="dialer-notes-list" style="font-size:12px;color:var(--text3)">Loading...</div>
         </div>
       </div>
       <div style="padding:10px 16px;border-top:1px solid var(--border)">
         <textarea id="dialer-note-input" placeholder="Quick note..." style="${ta}"></textarea>
         <button class="btn btn-primary btn-sm" style="margin-top:6px;width:100%;justify-content:center" onclick="saveDialerNote('${co.id}')">Save note</button>
-      </div>
-      <div style="padding:10px 16px;border-top:1px solid var(--border)">
-        <button class="btn btn-sm" style="width:100%;justify-content:center" onclick="state.dialerCompany=null;renderDialerView()">← Back to Queue</button>
-      </div>
-    </div>` : `
-    <div style="width:300px;flex-shrink:0;background:var(--bg);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
-        <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em">📋 ${activeQueue?.name || 'Queue'}</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px">${queueCompanies.length} companies — click to load info</div>
-      </div>
-      <div style="flex:1;overflow-y:auto">
-        ${queueCompanies.length === 0 ? `<div style="padding:20px;font-size:13px;color:var(--text3);text-align:center">Queue is empty.<br><br>Add companies from the Companies view.</div>` :
-          queueCompanies.map(qc => {
-            const qContact = state.contacts.find(x => x.id === qc.id);
-            return `<div onclick="state.dialerCompany={id:'${qc.id}',name:'${(qc.name||'').replace(/'/g,"\\'")}',phone:'${(qc.phone||'').replace(/'/g,"\\'")}'}; renderDialerView()" style="padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-              <div style="font-size:13px;font-weight:600;color:var(--text)">${qc.name}</div>
-              <div style="font-size:11px;color:var(--text3);margin-top:2px">${qc.phone ? `<span style="color:var(--green)">${qc.phone}</span>` : 'No phone'}${qContact ? ` · ${qContact.masterStage || qContact.stage || ''}` : ''}</div>
-            </div>`;
-          }).join('')}
-      </div>
+      </div>` : `
+      <div style="padding:20px;font-size:13px;color:var(--text3);text-align:center;margin-top:40px">Queue is empty.<br><br>Add companies from HS Views.</div>`}
     </div>`;
 
   main.innerHTML = `
@@ -3491,6 +3472,15 @@ async function renderDialerView() {
     </div>`;
 
   updateDialerOverlay();
+  if (co?.id) loadQueueNotes(co.id, 'dialer-notes-list');
+}
+
+function dialerNav(dir) {
+  state.dialerCompany = null;
+  const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
+  if (!activeQueue) return;
+  state._queueIdx = Math.max(0, Math.min((state._queueIdx || 0) + dir, activeQueue.companies.length - 1));
+  renderDialerView();
 }
 
 async function saveDialerNote(companyId) {
@@ -3498,13 +3488,9 @@ async function saveDialerNote(companyId) {
   const text = input?.value.trim();
   if (!text) return;
   try { await hsPost('/crm/v3/objects/notes', { properties: { hs_note_body: text, hs_timestamp: Date.now() }, associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }] }); } catch {}
-  try { await fetch('/api/notes', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text, date: new Date().toLocaleString() }) }); } catch {}
-  if (!state.notes) state.notes = {};
-  if (!state.notes[companyId]) state.notes[companyId] = [];
-  state.notes[companyId].unshift({ text, date: new Date().toLocaleString() });
+  fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text, date: new Date().toLocaleString() }) }).catch(() => {});
   if (input) input.value = '';
-  const list = document.getElementById('dialer-notes-list');
-  if (list) list.innerHTML = state.notes[companyId].slice(0,15).map(n => `<div style="padding:8px 0;border-bottom:1px solid var(--border)"><div style="font-size:10px;color:var(--text3);margin-bottom:3px">${n.date}</div><div style="font-size:12px;color:var(--text2);line-height:1.5;white-space:pre-wrap">${(n.text||'').slice(0,300)}</div></div>`).join('') || '<div style="font-size:12px;color:var(--text3)">No notes yet</div>';
+  loadQueueNotes(companyId, 'dialer-notes-list');
   toast('Note saved ✓', 'success');
 }
 
