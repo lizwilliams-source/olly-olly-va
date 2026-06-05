@@ -2197,17 +2197,40 @@ if (window.location.search.includes('calendar=connected')) {
 }
 
 // ─── CALL LOGGING MODAL ───────────────────────────────────────────────────────
-function openSetDemoNotes(companyId) {
+async function openSetDemoNotes(companyId) {
   const c = state.contacts.find(x => x.id === companyId)
     || state.queues.flatMap(q => q.companies).find(c => c.id === companyId)
     || state._hsViewCompanies?.find(c => c.id === companyId)
     || { id: companyId, name: companyId };
   state.selectedCallType = 'demo';
   document.getElementById('modal-title').innerHTML = `🎯 Set Demo Notes — ${c.name}`;
-  document.getElementById('modal-body').innerHTML = `<div id="call-logger-content"></div>`;
+  document.getElementById('modal-body').innerHTML = `<div id="call-logger-content"><div style="padding:20px;text-align:center;color:var(--text3);font-size:13px">Loading existing notes...</div></div>`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>`;
   document.getElementById('modal').style.display = 'flex';
-  showCallAnalysis(companyId, '', { demoNotes: {}, interested: null, sentiment: null });
+
+  // Load existing HubSpot notes so rep can see prior context
+  const notes = [];
+  try {
+    const nr = await fetch(`/api/users?action=getnotes&companyId=${companyId}`, { headers: { Authorization: `Bearer ${state.token}` } });
+    if (nr.ok) { const { notes: kv } = await nr.json(); notes.push(...(kv || [])); }
+  } catch {}
+  try {
+    const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/notes`, Authorization: `Bearer ${state.token}` } });
+    const assocData = await assocRes.json();
+    const noteIds = (assocData.results || []).map(r => r.id).slice(0, 20);
+    if (noteIds.length) {
+      const noteRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/notes/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: noteIds.map(id => ({ id })), properties: ['hs_note_body', 'hs_timestamp'] }) });
+      const noteData = await noteRes.json();
+      const seen = new Set(notes.map(n => n.text?.trim()));
+      (noteData.results || []).filter(n => n.properties?.hs_note_body).forEach(n => {
+        const text = n.properties.hs_note_body;
+        if (!seen.has(text.trim())) { seen.add(text.trim()); notes.push({ text, date: n.properties.hs_timestamp ? new Date(n.properties.hs_timestamp).toLocaleString() : '' }); }
+      });
+    }
+  } catch {}
+  notes.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  showCallAnalysis(companyId, '', { demoNotes: {}, interested: null, sentiment: null }, notes);
 }
 
 async function openCallLogger(companyId) {
@@ -2491,7 +2514,7 @@ async function handleAudioUpload(companyId) {
   }
 }
 
-function showCallAnalysis(companyId, transcript, analysis) {
+function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
   // Store transcript + analysis for email template use
   state.lastCallContext = `TRANSCRIPT:\n${transcript}\n\nANALYSIS SUMMARY:\n${analysis.summary || ''}\nInterested: ${analysis.interested}\nSentiment: ${analysis.sentiment || ''}${analysis.followUpCommitment ? '\nFollow-up: ' + analysis.followUpCommitment : ''}`;
   state.lastCallCompanyId = companyId;
@@ -2600,6 +2623,10 @@ function showCallAnalysis(companyId, transcript, analysis) {
             <div class="field-label" style="margin-bottom:4px">Deal name</div>
             <input id="deal-name" value="${c?.name || ''}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
           </div>
+          <div style="margin-bottom:8px">
+            <div class="field-label" style="margin-bottom:4px">Stage</div>
+            <select id="deal-stage" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none"><option value="">Loading stages...</option></select>
+          </div>
           <div style="margin-bottom:10px">
             <div class="field-label" style="margin-bottom:4px">Amount (optional)</div>
             <input id="deal-amount" type="number" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
@@ -2673,9 +2700,17 @@ function showCallAnalysis(companyId, transcript, analysis) {
       ${typeBlock}
       ${followUpBlock}
       ${saveBar}
+      ${priorNotes.length ? `
+      <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Prior Notes (${priorNotes.length})</div>
+        <div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+          ${priorNotes.slice(0,10).map(n => `<div style="padding:8px 10px;background:var(--bg3);border-radius:6px"><div style="font-size:10px;color:var(--text3);margin-bottom:3px">${n.date}</div><div style="font-size:12px;color:var(--text2);white-space:pre-wrap">${(n.text||'').slice(0,400)}</div></div>`).join('')}
+        </div>
+      </div>` : ''}
     </div>`;
 
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
+  if (type === 'demo') loadDealStages();
 }
 
 async function createCalendarEvent(companyId) {
@@ -2859,20 +2894,44 @@ async function sendClientCalendarInvite(companyId) {
   }
 }
 
+async function loadDealStages() {
+  const sel = document.getElementById('deal-stage');
+  if (!sel) return;
+  if (state._hsDealStages) {
+    sel.innerHTML = state._hsDealStages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
+    return;
+  }
+  try {
+    const res = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/pipelines/deals', Authorization: `Bearer ${state.token}` } });
+    const data = await res.json();
+    const stages = (data.results || []).flatMap(p => (p.stages || []).map(s => ({ id: s.id, label: `${p.label} → ${s.label}` })));
+    state._hsDealStages = stages;
+    if (sel) sel.innerHTML = stages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
+  } catch { if (sel) sel.innerHTML = '<option value="">Could not load stages</option>'; }
+}
+
 async function createHubSpotDeal(companyId) {
   const name = document.getElementById('deal-name')?.value.trim();
+  const stage = document.getElementById('deal-stage')?.value;
   const amount = document.getElementById('deal-amount')?.value.trim();
   const msg = document.getElementById('deal-msg');
-  if (!name) { if (msg) msg.style.color = 'var(--red)', msg.textContent = 'Enter a deal name'; return; }
+  if (!name) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Enter a deal name'; } return; }
+  if (!stage) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Select a stage'; } return; }
   try {
-    await hsPost('/crm/v3/objects/deals', {
-      properties: { dealname: name, dealstage: 'appointmentscheduled', hubspot_owner_id: state.ownerId, ...(amount ? { amount } : {}) },
+    const data = await hsPost('/crm/v3/objects/deals', {
+      properties: { dealname: name, dealstage: stage, hubspot_owner_id: state.ownerId, ...(amount ? { amount } : {}) },
       associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 5 }] }],
     });
-    if (msg) { msg.style.color = 'var(--green)'; msg.textContent = '✓ Deal created in HubSpot!'; }
-    toast('💼 Deal created ✓', 'success');
+    if (data.id) {
+      if (msg) { msg.style.color = 'var(--green)'; msg.textContent = '✓ Deal created in HubSpot!'; }
+      toast('💼 Deal created ✓', 'success');
+    } else {
+      const err = data.message || data.error || JSON.stringify(data);
+      if (msg) { msg.style.color = 'var(--red)'; msg.textContent = err; }
+      toast('Failed to create deal', 'error');
+    }
   } catch (e) {
-    if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Failed: ' + e.message; }
+    if (msg) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
   }
 }
 
