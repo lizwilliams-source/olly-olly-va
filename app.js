@@ -2647,14 +2647,7 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
             <div class="field-label" style="margin-bottom:4px">Deal name</div>
             <input id="deal-name" value="${c?.name || ''}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
           </div>
-          <div style="margin-bottom:8px">
-            <div class="field-label" style="margin-bottom:4px">Stage</div>
-            <select id="deal-stage" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none"><option value="">Loading stages...</option></select>
-          </div>
-          <div style="margin-bottom:8px">
-            <div class="field-label" style="margin-bottom:4px">Deal type</div>
-            <select id="deal-type" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none"><option value="">Loading...</option></select>
-          </div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Stage: <strong style="color:var(--text)">Demo Set</strong> · Type: <strong style="color:var(--text)">Master Deal</strong></div>
           <div style="margin-bottom:10px">
             <div class="field-label" style="margin-bottom:4px">Amount (optional)</div>
             <input id="deal-amount" type="number" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
@@ -2738,7 +2731,7 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
     </div>`;
 
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`;
-  if (type === 'demo') loadDealStages();
+  if (type === 'demo') loadDealMeta();
 }
 
 async function createCalendarEvent(companyId) {
@@ -2922,43 +2915,29 @@ async function sendClientCalendarInvite(companyId) {
   }
 }
 
-async function loadDealStages() {
-  const sel = document.getElementById('deal-stage');
-  const typeSel = document.getElementById('deal-type');
-  if (!sel && !typeSel) return;
+async function loadDealMeta() {
+  if (state._hsDealStageId && state._hsDealTypeValue) return;
   try {
-    if (!state._hsDealStages) {
-      const [stageRes, typeRes] = await Promise.all([
-        fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/deals/dealstage', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
-        fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/deals/dealtype', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
-      ]);
-      state._hsDealStages = (stageRes.options || []).filter(o => !o.hidden).map(o => ({ id: o.value, label: o.label }));
-      state._hsDealTypes = (typeRes.options || []).filter(o => !o.hidden).map(o => ({ value: o.value, label: o.label }));
-    }
-    if (sel && state._hsDealStages.length) {
-      sel.innerHTML = state._hsDealStages.map(s => `<option value="${s.id}">${s.label}</option>`).join('');
-      const demoSet = state._hsDealStages.find(s => s.label.toLowerCase().includes('demo set'));
-      if (demoSet) sel.value = demoSet.id;
-    }
-    if (typeSel && state._hsDealTypes.length) {
-      typeSel.innerHTML = state._hsDealTypes.map(t => `<option value="${t.value}">${t.label}</option>`).join('');
-      const master = state._hsDealTypes.find(t => t.label.toLowerCase().includes('master'));
-      if (master) typeSel.value = master.value;
-    }
-  } catch (e) {
-    if (sel) sel.innerHTML = `<option value="">Error: ${e.message}</option>`;
-  }
+    const [stageRes, typeRes] = await Promise.all([
+      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/deals/dealstage', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
+      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': '/crm/v3/properties/deals/dealtype', Authorization: `Bearer ${state.token}` } }).then(r => r.json()),
+    ]);
+    const demoSet = (stageRes.options || []).find(o => o.label?.toLowerCase().includes('demo set'));
+    state._hsDealStageId = demoSet?.value || null;
+    const master = (typeRes.options || []).find(o => o.label?.toLowerCase().includes('master') || o.value?.toLowerCase() === 'md');
+    state._hsDealTypeValue = master?.value || 'MD';
+  } catch {}
 }
 
 async function createHubSpotDeal(companyId) {
   const name = document.getElementById('deal-name')?.value.trim();
-  const stage = document.getElementById('deal-stage')?.value;
-  const dealtype = document.getElementById('deal-type')?.value;
   const amount = document.getElementById('deal-amount')?.value.trim();
   const msg = document.getElementById('deal-msg');
   if (!name) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Enter a deal name'; } return; }
-  if (!stage) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Select a stage'; } return; }
   if (msg) { msg.style.color = 'var(--text3)'; msg.textContent = 'Creating...'; }
+  await loadDealMeta();
+  const stage = state._hsDealStageId;
+  const dealtype = state._hsDealTypeValue || 'MD';
   try {
     // Fetch primary contact to associate
     let contactId = null;
