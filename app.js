@@ -2642,18 +2642,9 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
           <div id="invite-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
         </div>
         <div style="border-top:1px solid rgba(62,207,142,.2);margin-top:14px;padding-top:14px">
-          <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">💼 Create HubSpot Deal</div>
-          <div style="margin-bottom:8px">
-            <div class="field-label" style="margin-bottom:4px">Deal name</div>
-            <input id="deal-name" value="${c?.name || ''}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Stage: <strong style="color:var(--text)">Demo Set</strong> · Type: <strong style="color:var(--text)">Master Deal</strong></div>
-          <div style="margin-bottom:10px">
-            <div class="field-label" style="margin-bottom:4px">Amount (optional)</div>
-            <input id="deal-amount" type="number" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
-          </div>
-          <button class="btn btn-sm" style="width:100%;justify-content:center;background:rgba(167,139,250,.1);border-color:rgba(167,139,250,.3);color:var(--purple)" onclick="createHubSpotDeal('${companyId}')">💼 Create deal in HubSpot</button>
-          <div id="deal-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+          <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">💼 Create HubSpot Deal</div>
+          <a href="https://app.hubspot.com/contacts/45530742/deal/create?associatedObjectType=0-2&associatedObjectId=${companyId}" target="_blank" class="btn btn-sm" style="width:100%;justify-content:center;background:rgba(167,139,250,.1);border-color:rgba(167,139,250,.3);color:var(--purple);text-decoration:none;display:flex">💼 Create deal in HubSpot ↗</a>
+          <div style="font-size:11px;color:var(--text3);margin-top:6px">Opens HubSpot with this company pre-linked</div>
         </div>
       </div>`;
   }
@@ -3213,9 +3204,11 @@ async function renderSettingsView() {
         </div>
 
         ${state.isAdmin ? `<div>
-          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔌 HubSpot Connection</div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:10px">If HubSpot is missing scopes (e.g. can't create deals), reconnect to grant full access.</div>
-          <button class="btn btn-sm" onclick="reconnectHubSpot()" style="margin-bottom:4px">Reconnect HubSpot with full scopes</button>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔌 HubSpot Private App Token</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:8px">Paste a HubSpot Private App token to unlock full API access (deals, etc). In HubSpot → Settings → Integrations → Private Apps → Create. Select all CRM scopes.</div>
+          <input id="hs-private-token" type="password" placeholder="pat-na1-..." style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;margin-bottom:8px" />
+          <button class="btn btn-primary btn-sm" onclick="saveHsPrivateToken()">Save token</button>
+          <div id="hs-token-msg" style="font-size:11px;margin-top:6px"></div>
         </div>
 
         <div>
@@ -3324,12 +3317,16 @@ async function renderSettingsView() {
   }
 }
 
-async function reconnectHubSpot() {
+async function saveHsPrivateToken() {
+  const val = document.getElementById('hs-private-token')?.value.trim();
+  const msg = document.getElementById('hs-token-msg');
+  if (!val) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Paste a token first'; } return; }
   try {
-    const res = await fetch('/api/hubspot?action=authurl', { headers: { Authorization: `Bearer ${state.token}` } });
-    const { url } = await res.json();
-    window.open(url, '_blank');
-  } catch { toast('Failed to get auth URL', 'error'); }
+    const res = await fetch('/api/users?action=savehsprivatetoken', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ privateToken: val }) });
+    const data = await res.json();
+    if (data.ok) { if (msg) { msg.style.color = 'var(--green)'; msg.textContent = '✓ Token saved — HubSpot will use this for all API calls'; } toast('HubSpot token saved ✓', 'success'); }
+    else { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = data.error; } }
+  } catch (e) { if (msg) { msg.style.color = 'var(--red)'; msg.textContent = e.message; } }
 }
 
 async function saveOrgResources() {

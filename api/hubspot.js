@@ -5,9 +5,13 @@ const HS_SCOPES = 'crm.objects.contacts.read crm.objects.contacts.write crm.obje
 
 async function getHsToken(KV_URL, KV_TOKEN) {
   const kvH = { Authorization: `Bearer ${KV_TOKEN}` };
+  // Private app token takes priority — doesn't expire, no refresh needed
+  const privateToken = await fetch(`${KV_URL}/get/hs_private_token`, { headers: kvH }).then(r => r.json());
+  if (privateToken.result) return privateToken.result;
+  // Fall back to OAuth access token cache
   const cached = await fetch(`${KV_URL}/get/hs_access_token`, { headers: kvH }).then(r => r.json());
   if (cached.result) return cached.result;
-  // Prefer KV-stored refresh token (updated via re-auth) over env var
+  // Refresh OAuth token
   const storedRefresh = await fetch(`${KV_URL}/get/hs_refresh_token`, { headers: kvH }).then(r => r.json());
   const refreshToken = storedRefresh.result || process.env.HUBSPOT_REFRESH_TOKEN;
   const params = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: process.env.HUBSPOT_CLIENT_ID, client_secret: process.env.HUBSPOT_CLIENT_SECRET });

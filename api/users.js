@@ -373,6 +373,20 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  if (action === 'savehsprivatetoken') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session?.isAdmin) return res.status(403).json({ error: 'Admin only' });
+    const { privateToken } = req.body;
+    if (!privateToken) return res.status(400).json({ error: 'privateToken required' });
+    const KV_URL = process.env.KV_REST_API_URL;
+    const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+    const kvH = { Authorization: `Bearer ${KV_TOKEN}` };
+    await fetch(`${KV_URL}/set/hs_private_token/${encodeURIComponent(privateToken)}`, { headers: kvH });
+    await fetch(`${KV_URL}/del/hs_access_token`, { headers: kvH });
+    return res.status(200).json({ ok: true });
+  }
+
   if (action === 'deletenote') {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await kvGet(`session:${token}`);
