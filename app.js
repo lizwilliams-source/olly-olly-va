@@ -849,29 +849,70 @@ async function loadHubSpotView(viewId, viewName) {
   const panel = document.getElementById('hs-view-companies');
   panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading...</div>`;
 
+  const propsStr = COMPANY_PROPS.map(p => `properties=${encodeURIComponent(p)}`).join('&');
+
   try {
-    // Try to get the view definition to get its real name + filters
-    let resolvedName = viewName;
-    let filterGroups = [];
-    try {
-      const viewDef = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-      if (viewDef.name) resolvedName = viewDef.name;
-      if (viewDef.filters?.length) filterGroups = viewDef.filters;
-    } catch {}
-
-    // Search using the view's filters (or just search with viewId)
-    const searchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups, properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
-    const searchData = await searchRes.json();
-
-    if (searchData.results?.length) {
-      renderHubSpotViewCompanies(searchData.results, resolvedName, viewId);
+    // Approach 1: GET with viewId query param
+    const getRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies?viewId=${viewId}&limit=100&${propsStr}`, Authorization: `Bearer ${state.token}` } });
+    const getData = await getRes.json();
+    if (getData.results?.length) {
+      renderHubSpotViewCompanies(getData.results, viewName, viewId);
       return;
     }
 
-    panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies found. The view may use filters that require additional API access.</div>`;
+    // Approach 2: POST search with viewId in body
+    const searchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ viewId, filterGroups: [], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
+    const searchData = await searchRes.json();
+    if (searchData.results?.length) {
+      renderHubSpotViewCompanies(searchData.results, viewName, viewId);
+      return;
+    }
+
+    // Approach 3: Fetch view definition, extract filters, build search
+    const viewDef = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
+    const resolvedName = viewDef.name || viewName;
+
+    // View filters can come back in different formats — normalise to filterGroups
+    let filterGroups = [];
+    if (viewDef.filterGroups?.length) {
+      filterGroups = viewDef.filterGroups;
+    } else if (viewDef.filters?.length) {
+      // Flat array — wrap each in its own group
+      filterGroups = viewDef.filters.map(f => ({ filters: Array.isArray(f) ? f : [f] }));
+    }
+
+    if (filterGroups.length) {
+      const fRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups, properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
+      const fData = await fRes.json();
+      if (fData.results?.length) {
+        renderHubSpotViewCompanies(fData.results, resolvedName, viewId);
+        return;
+      }
+    }
+
+    panel.innerHTML = `<div style="padding:20px;font-size:13px;color:var(--text3)">
+      <div style="margin-bottom:8px;font-weight:600;color:var(--text)">Couldn't load this view automatically.</div>
+      HubSpot's API may not expose the filters for this view type. Try a different view, or use the filter builder below to pull companies manually.
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2)">Quick filter by stage:</div>
+        ${['Demo Set','Demo Completed','Contract Sent','Contract Revision','Customer'].map(s =>
+          `<button class="btn btn-sm" onclick="loadHubSpotByStage('${s}')" style="justify-content:flex-start">${s}</button>`
+        ).join('')}
+      </div>
+    </div>`;
   } catch (e) {
     panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`;
   }
+}
+
+async function loadHubSpotByStage(stage) {
+  const panel = document.getElementById('hs-view-companies');
+  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading ${stage}...</div>`;
+  try {
+    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'subscription_status', operator: 'EQ', value: stage }] }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
+    const data = await res.json();
+    renderHubSpotViewCompanies(data.results || [], stage, stage);
+  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
 }
 
 function renderHubSpotViewCompanies(results, viewName, viewId) {
