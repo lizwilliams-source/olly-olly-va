@@ -1329,7 +1329,7 @@ async function loadQueueNotes(companyId, targetId = 'queue-notes-area') {
   const notes = [];
   try {
     const nr = await fetch(`/api/users?action=getnotes&companyId=${companyId}`, { headers: { Authorization: `Bearer ${state.token}` } });
-    if (nr.ok) { const { notes: kv } = await nr.json(); notes.push(...(kv || [])); }
+    if (nr.ok) { const { notes: kv } = await nr.json(); notes.push(...(kv || []).map(n => ({ ...n, source: 'kv' }))); }
   } catch {}
   try {
     const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/notes`, Authorization: `Bearer ${state.token}` } });
@@ -1343,16 +1343,40 @@ async function loadQueueNotes(companyId, targetId = 'queue-notes-area') {
         const text = n.properties.hs_note_body;
         if (!seen.has(text.trim())) {
           seen.add(text.trim());
-          notes.push({ text, date: n.properties.hs_timestamp ? new Date(n.properties.hs_timestamp).toLocaleString() : '' });
+          notes.push({ text, date: n.properties.hs_timestamp ? new Date(n.properties.hs_timestamp).toLocaleString() : '', source: 'hs', hsId: n.id });
         }
       });
     }
   } catch {}
   notes.sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!state._noteRegistry) state._noteRegistry = {};
+  state._noteRegistry[`${companyId}_${targetId}`] = notes;
   if (!document.getElementById(targetId)) return;
   document.getElementById(targetId).innerHTML = notes.length
-    ? notes.map(n => `<div style="padding:10px 12px;background:var(--bg3);border-radius:6px;margin-bottom:8px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">${n.date}</div><div style="font-size:13px;color:var(--text);white-space:pre-wrap">${n.text}</div></div>`).join('')
+    ? notes.map((n, i) => `
+      <div style="padding:10px 12px;background:var(--bg3);border-radius:6px;margin-bottom:8px;position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+          <div style="font-size:11px;color:var(--text3)">${n.date}</div>
+          <button onmousedown="event.preventDefault();deleteNote('${companyId}',${i},'${targetId}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 8px;flex-shrink:0" title="Delete note">×</button>
+        </div>
+        <div style="font-size:13px;color:var(--text);white-space:pre-wrap">${n.text}</div>
+      </div>`).join('')
     : '<span style="color:var(--text3)">No notes yet</span>';
+}
+
+async function deleteNote(companyId, idx, targetId) {
+  const note = state._noteRegistry?.[`${companyId}_${targetId}`]?.[idx];
+  if (!note) return;
+  try {
+    if (note.hsId) {
+      await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': `/crm/v3/objects/notes/${note.hsId}`, 'X-HubSpot-Method': 'DELETE', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({}) });
+    }
+    if (note.source === 'kv' || !note.hsId) {
+      await fetch('/api/users?action=deletenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, date: note.date, text: note.text }) });
+    }
+    toast('Note deleted', 'success');
+  } catch { toast('Failed to delete note', 'error'); }
+  loadQueueNotes(companyId, targetId);
 }
 
 async function saveQueueNote(companyId) {
@@ -2519,8 +2543,8 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
   state.lastCallContext = `TRANSCRIPT:\n${transcript}\n\nANALYSIS SUMMARY:\n${analysis.summary || ''}\nInterested: ${analysis.interested}\nSentiment: ${analysis.sentiment || ''}${analysis.followUpCommitment ? '\nFollow-up: ' + analysis.followUpCommitment : ''}`;
   state.lastCallCompanyId = companyId;
   state.lastCallDate = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
-  // Auto-save to KV so it persists across sessions
-  fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text: state.lastCallContext, date: new Date().toLocaleString(), type: 'call_transcript' }) }).catch(() => {});
+  // Auto-save to KV (only when there's real transcript content)
+  if (transcript) fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text: state.lastCallContext, date: new Date().toLocaleString(), type: 'call_transcript' }) }).catch(() => {});
   if (!state.notes) state.notes = {};
   if (!state.notes[companyId]) state.notes[companyId] = [];
   if (!state.notes[companyId].find(n => n.type === 'call_transcript' && n.date === new Date().toLocaleString()))

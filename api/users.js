@@ -373,6 +373,17 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 
+  if (action === 'deletenote') {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const session = await kvGet(`session:${token}`);
+    if (!session) return res.status(401).json({ error: 'Unauthorized' });
+    const { companyId, date, text } = req.body;
+    const existing = await kvGet(`notes:${companyId}`) || [];
+    const filtered = existing.filter(n => !(n.date === date && n.text === text));
+    await kvSet(`notes:${companyId}`, filtered);
+    return res.status(200).json({ ok: true });
+  }
+
   if (action === 'reorderqueue') {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const session = await kvGet(`session:${token}`);

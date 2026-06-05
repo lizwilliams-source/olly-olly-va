@@ -220,6 +220,7 @@ export default async function handler(req, res) {
       body: ['POST', 'PATCH', 'PUT'].includes(hsMethod) ? JSON.stringify(req.body) : undefined,
     });
 
+    if (hsRes.status === 204) return res.status(200).json({ ok: true });
     const data = await hsRes.json();
     return res.status(hsRes.status).json(data);
   } catch (err) {
