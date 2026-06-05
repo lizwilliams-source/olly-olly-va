@@ -801,6 +801,9 @@ function leadCardHTML(c) {
 state._hsViews = null;
 state._hsViewCompanies = null;
 state._hsActiveView = null;
+state._hsSearchBody = null;
+state._hsSearchAfter = null;
+state._hsActiveViewName = null;
 
 state._hsProps = null;
 
@@ -817,6 +820,7 @@ async function loadHsProperties() {
         prop: p.name,
         type: p.fieldType === 'select' || p.fieldType === 'checkbox' || p.fieldType === 'booleancheckbox' ? 'enum' : p.fieldType === 'date' || p.fieldType === 'datetime' ? 'date' : p.fieldType === 'number' ? 'number' : 'text',
         values: (p.options || []).map(o => ({ label: o.label, value: o.value })),
+        referencedObjectType: p.referencedObjectType || null,
       }));
   } catch {}
   return state._hsProps || [];
@@ -835,11 +839,13 @@ async function renderHubSpotViews() {
         <div id="hs-filter-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
           <div style="font-size:12px;color:var(--text3)">Loading properties...</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-sm" onclick="addHsFilterRow()">+ Add filter</button>
           <button class="btn btn-primary" onclick="runHsFilter()">Search →</button>
+          <button class="btn btn-sm" onclick="saveHsFilter()">Save filter</button>
           <span style="font-size:11px;color:var(--text3);margin-left:4px">All filters combined with AND</span>
         </div>
+        <div id="hs-saved-filters" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px"></div>
         <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
           <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Quick views</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px">
@@ -859,6 +865,7 @@ async function renderHubSpotViews() {
   await loadHsProperties();
   document.getElementById('hs-filter-rows').innerHTML = '';
   addHsFilterRow();
+  renderSavedFilters();
 }
 
 const HS_OPERATORS = {
@@ -928,7 +935,9 @@ function updateHsFilterRow(idx) {
   const opSel = document.getElementById(`hs-fo-${idx}`);
   if (opSel) opSel.innerHTML = (HS_OPERATORS[type] || HS_OPERATORS.text).map(([v,l]) => `<option value="${v}">${l}</option>`).join('');
   // swap value input for the selected property type
-  if (type === 'enum' && def.values?.length) {
+  if (def?.referencedObjectType === 'OWNER') {
+    valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${s}"><option value="${state.ownerId}">Me</option></select>`;
+  } else if (type === 'enum' && def.values?.length) {
     valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${s}">${def.values.map(v => `<option value="${v.value}">${v.label}</option>`).join('')}</select>`;
   } else if (type === 'date') {
     valWrap.innerHTML = `<input id="hs-fv-${idx}" type="date" style="${s}" />`;
@@ -937,6 +946,34 @@ function updateHsFilterRow(idx) {
   } else {
     valWrap.innerHTML = `<input id="hs-fv-${idx}" placeholder="value" style="${s}" />`;
   }
+}
+
+async function _hsSearch(filterGroups, viewName, viewId, loadingMsg) {
+  const body = { filterGroups, properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 200 };
+  state._hsSearchBody = body;
+  state._hsSearchAfter = null;
+  state._hsActiveViewName = viewName;
+  state._hsActiveView = viewId;
+  const panel = document.getElementById('hs-view-companies');
+  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>${loadingMsg || 'Loading...'}</div>`;
+  try {
+    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify(body) });
+    const data = await res.json();
+    state._hsSearchAfter = data.paging?.next?.after || null;
+    renderHubSpotViewCompanies(data.results || [], viewName, viewId, false);
+  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
+}
+
+async function loadMoreHsResults() {
+  if (!state._hsSearchBody || !state._hsSearchAfter) return;
+  const btn = document.getElementById('hs-load-more');
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+  try {
+    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ ...state._hsSearchBody, after: state._hsSearchAfter }) });
+    const data = await res.json();
+    state._hsSearchAfter = data.paging?.next?.after || null;
+    renderHubSpotViewCompanies(data.results || [], state._hsActiveViewName, state._hsActiveView, true);
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Load more'; } }
 }
 
 async function runHsFilter() {
@@ -955,83 +992,74 @@ async function runHsFilter() {
     }
   }
   if (!filters.length) { toast('Add at least one filter', 'error'); return; }
-
-  const panel = document.getElementById('hs-view-companies');
-  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Searching...</div>`;
-  try {
-    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
-    const data = await res.json();
-    renderHubSpotViewCompanies(data.results || [], `Filter results`, 'custom');
-  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
+  await _hsSearch([{ filters }], 'Filter results', 'custom', 'Searching...');
 }
 
 async function loadHsMyCompanies() {
-  const panel = document.getElementById('hs-view-companies');
-  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading...</div>`;
-  try {
-    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }] }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
-    const data = await res.json();
-    renderHubSpotViewCompanies(data.results || [], 'My Companies', 'myco');
-  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
+  await _hsSearch([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }] }], 'My Companies', 'myco');
 }
 
 async function loadHsNeverCalled() {
-  const panel = document.getElementById('hs-view-companies');
-  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading...</div>`;
-  try {
-    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
-    const data = await res.json();
-    renderHubSpotViewCompanies(data.results || [], 'Never Called', 'never');
-  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
+  await _hsSearch([{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }], 'Never Called', 'never');
 }
-
 
 async function loadHubSpotByStage(stage) {
-  const panel = document.getElementById('hs-view-companies');
-  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading ${stage}...</div>`;
-  try {
-    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'subscription_status', operator: 'EQ', value: stage }] }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
-    const data = await res.json();
-    renderHubSpotViewCompanies(data.results || [], stage, stage);
-  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
+  await _hsSearch([{ filters: [{ propertyName: 'subscription_status', operator: 'EQ', value: stage }] }], stage, stage, `Loading ${stage}...`);
 }
 
-function renderHubSpotViewCompanies(results, viewName, viewId) {
+function renderHubSpotViewCompanies(results, viewName, viewId, append) {
   const panel = document.getElementById('hs-view-companies');
-  if (!results.length) { panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies in this view.</div>`; return; }
-
   const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
   const inQueue = new Set((activeQueue?.companies || []).map(c => c.id));
 
+  const makeCard = r => {
+    const p = r.properties || {};
+    const id = r.id;
+    const name = p.name || '—';
+    const phone = p.phone || p.contact_phone_number__ || '';
+    const city = p.city || ''; const st = p.state || '';
+    const stage = p.lifecyclestage || p.hs_lead_status || p.subscription_status || '';
+    const already = inQueue.has(id);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="flex:1;min-width:0;cursor:pointer" onclick="openContact('${id}')">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${name}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">${[phone, [city,st].filter(Boolean).join(', '), stage].filter(Boolean).join(' · ')}</div>
+      </div>
+      <button class="btn btn-sm ${already ? '' : 'btn-primary'}" style="flex-shrink:0;font-size:11px${already ? ';color:var(--text3)' : ''}"
+        onclick="addHsCompanyToQueue('${id}','${name.replace(/'/g,"\\'")}','${phone.replace(/'/g,"\\'")}',this)" ${already ? 'disabled' : ''}>
+        ${already ? '✓ In queue' : '+ Queue'}
+      </button>
+    </div>`;
+  };
+
+  if (append) {
+    const list = document.getElementById('hs-view-company-list');
+    if (list && results.length) {
+      list.insertAdjacentHTML('beforeend', results.map(makeCard).join(''));
+      state._hsViewCompanies = [...(state._hsViewCompanies || []), ...results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.phone || r.properties?.contact_phone_number__ || '' }))];
+      const countEl = document.getElementById('hs-view-count');
+      if (countEl) countEl.textContent = `${state._hsViewCompanies.length} companies`;
+    }
+    const loadMoreWrap = document.getElementById('hs-load-more-wrap');
+    if (loadMoreWrap) loadMoreWrap.style.display = state._hsSearchAfter ? '' : 'none';
+    return;
+  }
+
+  if (!results.length) { panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies found.</div>`; return; }
+
+  state._hsViewCompanies = results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.phone || r.properties?.contact_phone_number__ || '' }));
+
   panel.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <div style="font-size:14px;font-weight:600;color:var(--text)">${viewName} <span style="font-size:12px;color:var(--text3);font-weight:400">${results.length} companies</span></div>
+      <div style="font-size:14px;font-weight:600;color:var(--text)">${viewName} <span id="hs-view-count" style="font-size:12px;color:var(--text3);font-weight:400">${results.length} companies</span></div>
       <button class="btn btn-sm btn-primary" onclick="addAllHsViewToQueue()" style="font-size:11px">+ Add all to queue</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px" id="hs-view-company-list">
-      ${results.map(r => {
-        const p = r.properties || {};
-        const id = r.id;
-        const name = p.name || '—';
-        const phone = p.phone || p.contact_phone_number__ || '';
-        const city = p.city || ''; const st = p.state || '';
-        const stage = p.lifecyclestage || p.hs_lead_status || p.subscription_status || '';
-        const already = inQueue.has(id);
-        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius)">
-          <div style="flex:1;min-width:0;cursor:pointer" onclick="openContact('${id}')">
-            <div style="font-size:13px;font-weight:600;color:var(--text)">${name}</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">${[phone, [city,st].filter(Boolean).join(', '), stage].filter(Boolean).join(' · ')}</div>
-          </div>
-          <button class="btn btn-sm ${already ? '' : 'btn-primary'}" style="flex-shrink:0;font-size:11px${already ? ';color:var(--text3)' : ''}"
-            onclick="addHsCompanyToQueue('${id}','${name.replace(/'/g,"\\'")}','${phone.replace(/'/g,"\\'")}',this)" ${already ? 'disabled' : ''}>
-            ${already ? '✓ In queue' : '+ Queue'}
-          </button>
-        </div>`;
-      }).join('')}
+      ${results.map(makeCard).join('')}
+    </div>
+    <div id="hs-load-more-wrap" style="text-align:center;padding:14px 0;${state._hsSearchAfter ? '' : 'display:none'}">
+      <button id="hs-load-more" class="btn btn-sm" onclick="loadMoreHsResults()">Load more</button>
     </div>`;
-
-  // Store for bulk add
-  state._hsViewCompanies = results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.phone || r.properties?.contact_phone_number__ || '' }));
 }
 
 function addHsCompanyToQueue(id, name, phone, btn) {
@@ -1058,10 +1086,76 @@ async function addAllHsViewToQueue() {
     const badge = document.getElementById('badge-queue');
     if (badge) badge.textContent = state.queues.reduce((s, q) => s + q.companies.length, 0);
     toast(`${added} companies added to queue ✓`, 'success');
-    renderHubSpotViewCompanies(state._hsViewCompanies.map(c => ({ id: c.id, properties: { name: c.name, phone: c.phone } })), state._hsActiveView, state._hsActiveView);
+    renderHubSpotViewCompanies(state._hsViewCompanies.map(c => ({ id: c.id, properties: { name: c.name, phone: c.phone } })), state._hsActiveViewName || state._hsActiveView, state._hsActiveView, false);
   } else {
     toast('All already in queue', 'success');
   }
+}
+
+function saveHsFilter() {
+  const name = prompt('Name this filter:');
+  if (!name?.trim()) return;
+  const rows = document.getElementById('hs-filter-rows')?.children || [];
+  const filters = [];
+  for (const row of rows) {
+    const idx = row.id.replace('hs-filter-row-', '');
+    const prop = document.getElementById(`hs-fp-${idx}`)?.value;
+    const propLabel = document.getElementById(`hs-fp-search-${idx}`)?.value;
+    const op = document.getElementById(`hs-fo-${idx}`)?.value;
+    const val = document.getElementById(`hs-fv-${idx}`)?.value || '';
+    if (prop && op) filters.push({ prop, propLabel, op, val });
+  }
+  if (!filters.length) { toast('Add at least one filter first', 'error'); return; }
+  const saved = JSON.parse(localStorage.getItem('hs_saved_filters') || '[]');
+  saved.push({ name: name.trim(), filters });
+  localStorage.setItem('hs_saved_filters', JSON.stringify(saved));
+  renderSavedFilters();
+  toast(`"${name.trim()}" saved`, 'success');
+}
+
+function deleteSavedHsFilter(idx) {
+  const saved = JSON.parse(localStorage.getItem('hs_saved_filters') || '[]');
+  saved.splice(idx, 1);
+  localStorage.setItem('hs_saved_filters', JSON.stringify(saved));
+  renderSavedFilters();
+}
+
+function loadSavedHsFilter(idx) {
+  const saved = JSON.parse(localStorage.getItem('hs_saved_filters') || '[]');
+  const f = saved[idx];
+  if (!f) return;
+  const container = document.getElementById('hs-filter-rows');
+  if (!container) return;
+  container.innerHTML = '';
+  f.filters.forEach((filter, i) => {
+    addHsFilterRow();
+    const fp = document.getElementById(`hs-fp-${i}`);
+    const fpSearch = document.getElementById(`hs-fp-search-${i}`);
+    if (fp) fp.value = filter.prop;
+    if (fpSearch) fpSearch.value = filter.propLabel;
+    updateHsFilterRow(i);
+    const fo = document.getElementById(`hs-fo-${i}`);
+    if (fo) fo.value = filter.op;
+    const fv = document.getElementById(`hs-fv-${i}`);
+    if (fv) fv.value = filter.val;
+  });
+}
+
+function renderSavedFilters() {
+  const container = document.getElementById('hs-saved-filters');
+  if (!container) return;
+  const saved = JSON.parse(localStorage.getItem('hs_saved_filters') || '[]');
+  if (!saved.length) { container.style.display = 'none'; return; }
+  container.style.display = '';
+  container.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Saved filters</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${saved.map((f, i) => `
+        <div style="display:flex;align-items:center;gap:2px">
+          <button class="btn btn-sm" onclick="loadSavedHsFilter(${i})">${f.name}</button>
+          <button onmousedown="event.preventDefault();deleteSavedHsFilter(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;padding:0 3px;font-size:16px;line-height:1" title="Delete">×</button>
+        </div>`).join('')}
+    </div>`;
 }
 
 async function renderMyQueue() {
