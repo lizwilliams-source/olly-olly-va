@@ -815,7 +815,7 @@ async function loadHsProperties() {
       .map(p => ({
         label: p.label,
         prop: p.name,
-        type: p.fieldType === 'select' || p.fieldType === 'checkbox' || p.fieldType === 'booleancheckbox' ? 'enum' : p.fieldType === 'date' || p.fieldType === 'datetime' ? 'date' : 'text',
+        type: p.fieldType === 'select' || p.fieldType === 'checkbox' || p.fieldType === 'booleancheckbox' ? 'enum' : p.fieldType === 'date' || p.fieldType === 'datetime' ? 'date' : p.fieldType === 'number' ? 'number' : 'text',
         values: (p.options || []).map(o => ({ label: o.label, value: o.value })),
       }));
   } catch {}
@@ -861,6 +861,13 @@ async function renderHubSpotViews() {
   addHsFilterRow();
 }
 
+const HS_OPERATORS = {
+  text:   [['EQ','is equal to'],['NEQ','is not equal to'],['CONTAINS_TOKEN','contains'],['NOT_CONTAINS_TOKEN',"doesn't contain"],['STARTS_WITH','starts with'],['HAS_PROPERTY','is known'],['NOT_HAS_PROPERTY','is unknown']],
+  number: [['EQ','is equal to'],['NEQ','is not equal to'],['GT','is greater than'],['GTE','is greater than or equal to'],['LT','is less than'],['LTE','is less than or equal to'],['HAS_PROPERTY','is known'],['NOT_HAS_PROPERTY','is unknown']],
+  enum:   [['EQ','is equal to'],['NEQ','is not equal to'],['IN','is any of'],['NOT_IN','is none of'],['HAS_PROPERTY','is known'],['NOT_HAS_PROPERTY','is unknown']],
+  date:   [['EQ','is on'],['GT','is after'],['GTE','is on or after'],['LT','is before'],['LTE','is on or before'],['HAS_PROPERTY','is known'],['NOT_HAS_PROPERTY','is unknown']],
+};
+
 function addHsFilterRow() {
   const container = document.getElementById('hs-filter-rows');
   const idx = container.children.length;
@@ -878,15 +885,7 @@ function addHsFilterRow() {
     </div>
     <input id="hs-fp-${idx}" type="hidden" value="" />
     <select id="hs-fo-${idx}" style="${s}">
-      <option value="EQ">equals</option>
-      <option value="NEQ">not equals</option>
-      <option value="CONTAINS_TOKEN">contains</option>
-      <option value="IN">is any of</option>
-      <option value="NOT_IN">is none of</option>
-      <option value="GT">greater than</option>
-      <option value="LT">less than</option>
-      <option value="HAS_PROPERTY">has value</option>
-      <option value="NOT_HAS_PROPERTY">is empty</option>
+      ${HS_OPERATORS.text.map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}
     </select>
     <div id="hs-fv-wrap-${idx}" style="flex:1;min-width:120px"><input id="hs-fv-${idx}" placeholder="value" style="${s};width:100%" /></div>
     <button onclick="document.getElementById('hs-filter-row-${idx}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px;padding:0 4px;flex-shrink:0">×</button>`;
@@ -923,11 +922,18 @@ function updateHsFilterRow(idx) {
   const valWrap = document.getElementById(`hs-fv-wrap-${idx}`);
   if (!prop || !valWrap) return;
   const def = (state._hsProps || []).find(p => p.prop === prop);
+  const type = def?.type || 'text';
   const s = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;width:100%';
-  if (def?.type === 'enum' && def.values?.length) {
+  // swap operators for the selected property type
+  const opSel = document.getElementById(`hs-fo-${idx}`);
+  if (opSel) opSel.innerHTML = (HS_OPERATORS[type] || HS_OPERATORS.text).map(([v,l]) => `<option value="${v}">${l}</option>`).join('');
+  // swap value input for the selected property type
+  if (type === 'enum' && def.values?.length) {
     valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${s}">${def.values.map(v => `<option value="${v.value}">${v.label}</option>`).join('')}</select>`;
-  } else if (def?.type === 'date') {
+  } else if (type === 'date') {
     valWrap.innerHTML = `<input id="hs-fv-${idx}" type="date" style="${s}" />`;
+  } else if (type === 'number') {
+    valWrap.innerHTML = `<input id="hs-fv-${idx}" type="number" placeholder="value" style="${s}" />`;
   } else {
     valWrap.innerHTML = `<input id="hs-fv-${idx}" placeholder="value" style="${s}" />`;
   }
