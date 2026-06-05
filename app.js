@@ -814,7 +814,7 @@ async function renderHubSpotViews() {
         <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px">Paste a HubSpot view URL</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Go to any company view in HubSpot, copy the URL from your browser, and paste it here.</div>
         <div style="display:flex;gap:8px">
-          <input id="hs-view-url" placeholder="https://app.hubspot.com/contacts/45530742/objects/0-2/views/..." style="${ta};flex:1" />
+          <input id="hs-view-url" placeholder="https://app.hubspot.com/contacts/45530742/objects/0-2/views/..." style="${ta};flex:1" onkeydown="if(event.key==='Enter')loadHubSpotViewFromUrl()" />
           <button class="btn btn-primary" onclick="loadHubSpotViewFromUrl()">Load →</button>
         </div>
         <div id="hs-url-error" style="font-size:12px;color:var(--red);margin-top:6px;display:none"></div>
@@ -854,28 +854,23 @@ async function loadHubSpotView(viewId, viewName) {
   try {
     const debug = [];
 
-    // Approach 1: GET with viewId query param
-    const getRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies?viewId=${viewId}&limit=100&${propsStr}`, Authorization: `Bearer ${state.token}` } });
-    const getData = await getRes.json();
-    debug.push(`GET ?viewId: status=${getRes.status} results=${getData.results?.length ?? 'none'} err=${getData.message || ''}`);
-    if (getData.results?.length) { renderHubSpotViewCompanies(getData.results, viewName, viewId); return; }
+    // Always run all three and collect results — show debug regardless
+    const [getRes, searchRes, viewDefRes] = await Promise.all([
+      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies?viewId=${viewId}&limit=100&${propsStr}`, Authorization: `Bearer ${state.token}` } }),
+      fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ viewId, filterGroups: [], properties: COMPANY_PROPS, limit: 100 }) }),
+      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } }),
+    ]);
 
-    // Approach 2: POST search with viewId in body
-    const searchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ viewId, filterGroups: [], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
-    const searchData = await searchRes.json();
-    debug.push(`POST search viewId: status=${searchRes.status} results=${searchData.results?.length ?? 'none'} err=${searchData.message || ''}`);
-    if (searchData.results?.length) { renderHubSpotViewCompanies(searchData.results, viewName, viewId); return; }
+    const [getData, searchData, viewDef] = await Promise.all([getRes.json(), searchRes.json(), viewDefRes.json()]);
 
-    // Approach 3: Fetch view definition
-    const viewDefRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } });
-    const viewDef = await viewDefRes.json();
-    debug.push(`GET view def: status=${viewDefRes.status} name=${viewDef.name || 'none'} keys=${Object.keys(viewDef).join(',')}`);
+    debug.push(`1. GET ?viewId=${viewId}: HTTP ${getRes.status} | results: ${getData.results?.length ?? 0} | error: ${getData.message || getData.error || 'none'}`);
+    debug.push(`2. POST search viewId: HTTP ${searchRes.status} | results: ${searchData.results?.length ?? 0} | error: ${searchData.message || searchData.error || 'none'}`);
+    debug.push(`3. GET view def: HTTP ${viewDefRes.status} | name: ${viewDef.name || 'none'} | keys: ${Object.keys(viewDef).join(', ')}`);
 
-    // Show debug so we can figure out the right approach
     panel.innerHTML = `<div style="padding:16px">
-      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px">View ID ${viewId} — debug output</div>
-      <pre style="font-size:11px;color:var(--text3);background:var(--bg3);padding:10px;border-radius:6px;overflow:auto;white-space:pre-wrap;margin-bottom:12px">${debug.map((d,i)=>`${i+1}. ${d}`).join('\n')}\n\nView def keys: ${Object.keys(viewDef).join(', ')}\n\nView def (first 800 chars):\n${JSON.stringify(viewDef, null, 2).slice(0, 800)}</pre>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Quick filter by stage while we figure this out:</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px">Debug — view ID: ${viewId}</div>
+      <pre style="font-size:11px;color:var(--text3);background:var(--bg3);padding:10px;border-radius:6px;overflow:auto;white-space:pre-wrap;max-height:200px;margin-bottom:12px">${debug.join('\n\n')}\n\n--- View def ---\n${JSON.stringify(viewDef, null, 2).slice(0, 1000)}</pre>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Quick filters while we sort this out:</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
         ${['Demo Set','Demo Completed','Contract Sent','Contract Revision','Customer'].map(s =>
           `<button class="btn btn-sm" onclick="loadHubSpotByStage('${s}')">${s}</button>`
@@ -883,7 +878,7 @@ async function loadHubSpotView(viewId, viewName) {
       </div>
     </div>`;
   } catch (e) {
-    panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`;
+    panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Error: ${e.message}</div>`;
   }
 }
 
