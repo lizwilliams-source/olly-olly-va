@@ -1329,7 +1329,7 @@ async function loadQueueNotes(companyId, targetId = 'queue-notes-area') {
         const text = n.properties.hs_note_body;
         if (!seen.has(text.trim())) {
           seen.add(text.trim());
-          notes.push({ text, date: new Date(parseInt(n.properties.hs_timestamp)).toLocaleString() });
+          notes.push({ text, date: n.properties.hs_timestamp ? new Date(n.properties.hs_timestamp).toLocaleString() : '' });
         }
       });
     }
@@ -2840,7 +2840,7 @@ async function pickFromHubSpot(companyId) {
       <div style="display:flex;flex-direction:column;gap:6px">
         ${calls.map(call => {
           const date = call.properties.hs_timestamp
-            ? new Date(parseInt(call.properties.hs_timestamp)).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })
+            ? new Date(call.properties.hs_timestamp).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })
             : 'Unknown date';
           const duration = call.properties.hs_call_duration
             ? `${Math.round(parseInt(call.properties.hs_call_duration) / 60000)}m`
