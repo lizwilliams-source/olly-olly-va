@@ -852,51 +852,33 @@ async function loadHubSpotView(viewId, viewName) {
   const propsStr = COMPANY_PROPS.map(p => `properties=${encodeURIComponent(p)}`).join('&');
 
   try {
+    const debug = [];
+
     // Approach 1: GET with viewId query param
     const getRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies?viewId=${viewId}&limit=100&${propsStr}`, Authorization: `Bearer ${state.token}` } });
     const getData = await getRes.json();
-    if (getData.results?.length) {
-      renderHubSpotViewCompanies(getData.results, viewName, viewId);
-      return;
-    }
+    debug.push(`GET ?viewId: status=${getRes.status} results=${getData.results?.length ?? 'none'} err=${getData.message || ''}`);
+    if (getData.results?.length) { renderHubSpotViewCompanies(getData.results, viewName, viewId); return; }
 
     // Approach 2: POST search with viewId in body
     const searchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ viewId, filterGroups: [], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
     const searchData = await searchRes.json();
-    if (searchData.results?.length) {
-      renderHubSpotViewCompanies(searchData.results, viewName, viewId);
-      return;
-    }
+    debug.push(`POST search viewId: status=${searchRes.status} results=${searchData.results?.length ?? 'none'} err=${searchData.message || ''}`);
+    if (searchData.results?.length) { renderHubSpotViewCompanies(searchData.results, viewName, viewId); return; }
 
-    // Approach 3: Fetch view definition, extract filters, build search
-    const viewDef = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-    const resolvedName = viewDef.name || viewName;
+    // Approach 3: Fetch view definition
+    const viewDefRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } });
+    const viewDef = await viewDefRes.json();
+    debug.push(`GET view def: status=${viewDefRes.status} name=${viewDef.name || 'none'} keys=${Object.keys(viewDef).join(',')}`);
 
-    // View filters can come back in different formats — normalise to filterGroups
-    let filterGroups = [];
-    if (viewDef.filterGroups?.length) {
-      filterGroups = viewDef.filterGroups;
-    } else if (viewDef.filters?.length) {
-      // Flat array — wrap each in its own group
-      filterGroups = viewDef.filters.map(f => ({ filters: Array.isArray(f) ? f : [f] }));
-    }
-
-    if (filterGroups.length) {
-      const fRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups, properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
-      const fData = await fRes.json();
-      if (fData.results?.length) {
-        renderHubSpotViewCompanies(fData.results, resolvedName, viewId);
-        return;
-      }
-    }
-
-    panel.innerHTML = `<div style="padding:20px;font-size:13px;color:var(--text3)">
-      <div style="margin-bottom:8px;font-weight:600;color:var(--text)">Couldn't load this view automatically.</div>
-      HubSpot's API may not expose the filters for this view type. Try a different view, or use the filter builder below to pull companies manually.
-      <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
-        <div style="font-size:12px;font-weight:600;color:var(--text2)">Quick filter by stage:</div>
+    // Show debug so we can figure out the right approach
+    panel.innerHTML = `<div style="padding:16px">
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px">View ID ${viewId} — debug output</div>
+      <pre style="font-size:11px;color:var(--text3);background:var(--bg3);padding:10px;border-radius:6px;overflow:auto;white-space:pre-wrap;margin-bottom:12px">${debug.map((d,i)=>`${i+1}. ${d}`).join('\n')}\n\nView def keys: ${Object.keys(viewDef).join(', ')}\n\nView def (first 800 chars):\n${JSON.stringify(viewDef, null, 2).slice(0, 800)}</pre>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Quick filter by stage while we figure this out:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
         ${['Demo Set','Demo Completed','Contract Sent','Contract Revision','Customer'].map(s =>
-          `<button class="btn btn-sm" onclick="loadHubSpotByStage('${s}')" style="justify-content:flex-start">${s}</button>`
+          `<button class="btn btn-sm" onclick="loadHubSpotByStage('${s}')">${s}</button>`
         ).join('')}
       </div>
     </div>`;
