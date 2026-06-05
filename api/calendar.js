@@ -72,15 +72,18 @@ export default async function handler(req, res) {
   if (action === 'create') {
     const { accessToken, error, needsConnect } = await getGTokens(sessionToken);
     if (error) return res.status(401).json({ error, needsConnect });
-    const { title, description, startTime, endTime } = req.body;
-    const eventRes = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+    const { title, description, startTime, endTime, attendees } = req.body;
+    const eventBody = {
+      summary: title, description,
+      start: { dateTime: startTime }, end: { dateTime: endTime },
+      reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
+    };
+    if (attendees?.length) eventBody.attendees = attendees.map(e => ({ email: e }));
+    const sendUpdates = attendees?.length ? 'all' : 'none';
+    const eventRes = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=${sendUpdates}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        summary: title, description,
-        start: { dateTime: startTime }, end: { dateTime: endTime },
-        reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 30 }] },
-      }),
+      body: JSON.stringify(eventBody),
     });
     const eventData = await eventRes.json();
     if (!eventRes.ok) return res.status(500).json({ error: eventData.error?.message || 'Failed to create event' });

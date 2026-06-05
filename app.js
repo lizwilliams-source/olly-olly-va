@@ -2563,6 +2563,33 @@ function showCallAnalysis(companyId, transcript, analysis) {
           </div>`).join('')}
         <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" onclick="saveDemoNotes('${companyId}')">💾 Save Demo Notes to HubSpot</button>
         <div id="dn-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+        <div style="border-top:1px solid rgba(62,207,142,.2);margin-top:14px;padding-top:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">📅 Client Calendar Invite</div>
+          <div style="margin-bottom:8px">
+            <div class="field-label" style="margin-bottom:4px">Prospect email</div>
+            <input id="invite-email" placeholder="prospect@email.com" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
+          </div>
+          <div style="margin-bottom:10px">
+            <div class="field-label" style="margin-bottom:4px">Meeting date & time</div>
+            <input id="invite-datetime" type="datetime-local" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Event title: <strong style="color:var(--text)">Meeting with ${c?.name?.split(' ')[0] || '[FirstName]'}</strong> · Description uses your template from Settings</div>
+          <button class="btn btn-sm" style="width:100%;justify-content:center;background:var(--blue-dim);border-color:rgba(79,142,247,.3);color:var(--blue)" onclick="sendClientCalendarInvite('${companyId}')">📅 Send invite to prospect</button>
+          <div id="invite-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+        </div>
+        <div style="border-top:1px solid rgba(62,207,142,.2);margin-top:14px;padding-top:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">💼 Create HubSpot Deal</div>
+          <div style="margin-bottom:8px">
+            <div class="field-label" style="margin-bottom:4px">Deal name</div>
+            <input id="deal-name" value="${c?.name || ''}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
+          </div>
+          <div style="margin-bottom:10px">
+            <div class="field-label" style="margin-bottom:4px">Amount (optional)</div>
+            <input id="deal-amount" type="number" placeholder="0" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
+          </div>
+          <button class="btn btn-sm" style="width:100%;justify-content:center;background:rgba(167,139,250,.1);border-color:rgba(167,139,250,.3);color:var(--purple)" onclick="createHubSpotDeal('${companyId}')">💼 Create deal in HubSpot</button>
+          <div id="deal-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
+        </div>
       </div>`;
   }
 
@@ -2774,6 +2801,62 @@ async function saveDemoNotes(companyId) {
     if (msg) msg.textContent = '✓ Saved to HubSpot!';
     toast('Demo notes saved to HubSpot ✓', 'success');
   } catch { toast('Failed to save demo notes', 'error'); }
+}
+
+function applyInviteTemplate(template, c) {
+  const firstName = c?.name?.split(' ')[0] || '';
+  const lastName = c?.name?.split(' ').slice(1).join(' ') || '';
+  return (template || '')
+    .replace(/\[FirstName\]/gi, firstName)
+    .replace(/\[LastName\]/gi, lastName)
+    .replace(/\[CompanyName\]/gi, c?.name || '')
+    .replace(/\[Phone\]/gi, c?.phone || '');
+}
+
+async function sendClientCalendarInvite(companyId) {
+  const email = document.getElementById('invite-email')?.value.trim();
+  const dt = document.getElementById('invite-datetime')?.value;
+  const msg = document.getElementById('invite-msg');
+  if (!email) { if (msg) msg.style.color = 'var(--red)', msg.textContent = 'Enter prospect email'; return; }
+  if (!dt) { if (msg) msg.style.color = 'var(--red)', msg.textContent = 'Pick a meeting date & time'; return; }
+  const c = state.contacts.find(x => x.id === companyId);
+  const firstName = c?.name?.split(' ')[0] || '';
+  const title = `Meeting with ${firstName}`;
+  const template = state.orgSettings?.calendarInviteTemplate || 'Hi [FirstName],\n\nLooking forward to connecting with you!\n\nBest,\n{{repName}}';
+  const description = applyInviteTemplate(template, c).replace('{{repName}}', state.user?.name || '');
+  const startTime = new Date(dt).toISOString();
+  const endTime = new Date(new Date(dt).getTime() + 60 * 60000).toISOString();
+  try {
+    const res = await fetch('/api/calendar?action=create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ title, description, startTime, endTime, attendees: [email] }),
+    });
+    const data = await res.json();
+    if (data.needsConnect) { if (confirm('Google Calendar not connected. Connect now?')) connectGoogleCalendar(); return; }
+    if (!data.ok) throw new Error(data.error);
+    if (msg) { msg.style.color = 'var(--green)'; msg.textContent = `✓ Invite sent to ${email}`; }
+    toast('📅 Client invite sent ✓', 'success');
+  } catch (e) {
+    if (msg) { msg.style.color = 'var(--red)'; msg.textContent = e.message; }
+  }
+}
+
+async function createHubSpotDeal(companyId) {
+  const name = document.getElementById('deal-name')?.value.trim();
+  const amount = document.getElementById('deal-amount')?.value.trim();
+  const msg = document.getElementById('deal-msg');
+  if (!name) { if (msg) msg.style.color = 'var(--red)', msg.textContent = 'Enter a deal name'; return; }
+  try {
+    await hsPost('/crm/v3/objects/deals', {
+      properties: { dealname: name, dealstage: 'appointmentscheduled', hubspot_owner_id: state.ownerId, ...(amount ? { amount } : {}) },
+      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 5 }] }],
+    });
+    if (msg) { msg.style.color = 'var(--green)'; msg.textContent = '✓ Deal created in HubSpot!'; }
+    toast('💼 Deal created ✓', 'success');
+  } catch (e) {
+    if (msg) { msg.style.color = 'var(--red)'; msg.textContent = 'Failed: ' + e.message; }
+  }
 }
 
 async function saveCoachingNotes(companyId) {
@@ -3029,6 +3112,16 @@ async function renderSettingsView() {
         </div>
 
         <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">📅 Client Calendar Invite Template</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:8px">Default description for client-facing calendar invites sent from Set Call Notes. Supports dynamic fields.</div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:10px;background:var(--bg3);border-radius:6px;padding:8px 12px;line-height:1.7">
+            Available fields: <code>[FirstName]</code> <code>[LastName]</code> <code>[CompanyName]</code> <code>[Phone]</code> <code>{{repName}}</code>
+          </div>
+          <textarea id="org-invite-template" style="width:100%;min-height:140px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px 12px;color:var(--text);font-size:13px;outline:none;font-family:inherit;resize:vertical" placeholder="Hi [FirstName],&#10;&#10;Looking forward to our demo!&#10;&#10;Best,&#10;{{repName}}">${(state.orgSettings?.calendarInviteTemplate || '').replace(/</g,'&lt;')}</textarea>
+          <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="saveInviteTemplate()">Save template</button>
+        </div>
+
+        <div>
           <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">👥 Team Members</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Add and manage reps.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -3124,6 +3217,15 @@ async function saveOrgResources() {
     await fetch('/api/users?action=setorgsettings', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ resourceLinks }) });
     state.orgSettings.resourceLinks = resourceLinks;
     toast('Resource links saved ✓', 'success');
+  } catch { toast('Failed to save', 'error'); }
+}
+
+async function saveInviteTemplate() {
+  const template = document.getElementById('org-invite-template')?.value || '';
+  try {
+    await fetch('/api/users?action=setorgsettings', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ calendarInviteTemplate: template }) });
+    state.orgSettings.calendarInviteTemplate = template;
+    toast('Invite template saved ✓', 'success');
   } catch { toast('Failed to save', 'error'); }
 }
 
