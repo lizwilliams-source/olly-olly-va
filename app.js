@@ -948,6 +948,26 @@ function updateHsFilterRow(idx) {
   }
 }
 
+async function enrichHsResultsWithContactPhones(results) {
+  if (!results.length) return;
+  try {
+    const assocRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v4/associations/companies/contacts/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: results.map(r => ({ id: r.id })) }) });
+    const assocData = await assocRes.json();
+    const contactMap = {};
+    if (assocData.results) assocData.results.forEach(r => { if (r.to?.length) contactMap[r.from.id] = String(r.to[0].toObjectId); });
+    const contactIds = [...new Set(Object.values(contactMap))];
+    if (!contactIds.length) return;
+    const phoneMap = {};
+    for (let i = 0; i < contactIds.length; i += 100) {
+      const chunk = contactIds.slice(i, i + 100);
+      const phoneRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/contacts/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: chunk.map(id => ({ id })), properties: ['phone', 'mobilephone'] }) });
+      const phoneData = await phoneRes.json();
+      (phoneData.results || []).forEach(c => { phoneMap[c.id] = c.properties.mobilephone || c.properties.phone || null; });
+    }
+    results.forEach(r => { const cid = contactMap[r.id]; if (cid && phoneMap[cid]) r.properties.contactPhone = phoneMap[cid]; });
+  } catch {}
+}
+
 async function _hsSearch(filterGroups, viewName, viewId, loadingMsg) {
   const body = { filterGroups, properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 200 };
   state._hsSearchBody = body;
@@ -959,8 +979,10 @@ async function _hsSearch(filterGroups, viewName, viewId, loadingMsg) {
   try {
     const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify(body) });
     const data = await res.json();
+    const results = data.results || [];
+    await enrichHsResultsWithContactPhones(results);
     state._hsSearchAfter = data.paging?.next?.after || null;
-    renderHubSpotViewCompanies(data.results || [], viewName, viewId, false);
+    renderHubSpotViewCompanies(results, viewName, viewId, false);
   } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
 }
 
@@ -971,8 +993,10 @@ async function loadMoreHsResults() {
   try {
     const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ ...state._hsSearchBody, after: state._hsSearchAfter }) });
     const data = await res.json();
+    const results = data.results || [];
+    await enrichHsResultsWithContactPhones(results);
     state._hsSearchAfter = data.paging?.next?.after || null;
-    renderHubSpotViewCompanies(data.results || [], state._hsActiveViewName, state._hsActiveView, true);
+    renderHubSpotViewCompanies(results, state._hsActiveViewName, state._hsActiveView, true);
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Load more'; } }
 }
 
@@ -1016,7 +1040,7 @@ function renderHubSpotViewCompanies(results, viewName, viewId, append) {
     const p = r.properties || {};
     const id = r.id;
     const name = p.name || '—';
-    const phone = p.phone || p.contact_phone_number__ || '';
+    const phone = p.contactPhone || p.phone || p.contact_phone_number__ || '';
     const city = p.city || ''; const st = p.state || '';
     const stage = p.lifecyclestage || p.hs_lead_status || p.subscription_status || '';
     const already = inQueue.has(id);
@@ -1036,7 +1060,7 @@ function renderHubSpotViewCompanies(results, viewName, viewId, append) {
     const list = document.getElementById('hs-view-company-list');
     if (list && results.length) {
       list.insertAdjacentHTML('beforeend', results.map(makeCard).join(''));
-      state._hsViewCompanies = [...(state._hsViewCompanies || []), ...results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.phone || r.properties?.contact_phone_number__ || '' }))];
+      state._hsViewCompanies = [...(state._hsViewCompanies || []), ...results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.contactPhone || r.properties?.phone || r.properties?.contact_phone_number__ || '' }))];
       const countEl = document.getElementById('hs-view-count');
       if (countEl) countEl.textContent = `${state._hsViewCompanies.length} companies`;
     }
@@ -1047,7 +1071,7 @@ function renderHubSpotViewCompanies(results, viewName, viewId, append) {
 
   if (!results.length) { panel.innerHTML = `<div style="padding:20px;color:var(--text3)">No companies found.</div>`; return; }
 
-  state._hsViewCompanies = results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.phone || r.properties?.contact_phone_number__ || '' }));
+  state._hsViewCompanies = results.map(r => ({ id: r.id, name: r.properties?.name || '', phone: r.properties?.contactPhone || r.properties?.phone || r.properties?.contact_phone_number__ || '' }));
 
   panel.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
