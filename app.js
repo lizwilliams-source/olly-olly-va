@@ -2516,7 +2516,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
       ${followUpDateStr ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">Suggested date: <strong style="color:var(--text)">${followUpDateStr}</strong></div>` : ''}
       <input type="datetime-local" id="followup-datetime"
         value="${analysis.followUpDate ? analysis.followUpDate.slice(0,16) : ''}"
-        style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
+        style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%;color-scheme:dark" />
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
         <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
@@ -2526,7 +2526,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
       <div class="field-label" style="margin-bottom:6px">📅 Schedule Follow-up</div>
       <div style="font-size:12px;color:var(--text2);margin-bottom:8px">No follow-up commitment detected — set one manually:</div>
       <input type="datetime-local" id="followup-datetime"
-        style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%" />
+        style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px;outline:none;margin-bottom:8px;width:100%;color-scheme:dark" />
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" onclick="createCalendarEvent('${companyId}')">📅 Google Calendar</button>
         <button class="btn btn-sm" style="flex:1;justify-content:center" onclick="createHubSpotTask('${companyId}')">✅ HubSpot Task</button>
@@ -2588,7 +2588,7 @@ function showCallAnalysis(companyId, transcript, analysis) {
           </div>
           <div style="margin-bottom:10px">
             <div class="field-label" style="margin-bottom:4px">Meeting date & time</div>
-            <input id="invite-datetime" type="datetime-local" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none" />
+            <input id="invite-datetime" type="datetime-local" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:12px;outline:none;color-scheme:dark" />
           </div>
           <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Event title: <strong style="color:var(--text)">Meeting with ${state.user?.name?.split(' ')[0] || 'You'}</strong> · Description uses your template from Settings</div>
           <button class="btn btn-sm" style="width:100%;justify-content:center;background:var(--blue-dim);border-color:rgba(79,142,247,.3);color:var(--blue)" onclick="sendClientCalendarInvite('${companyId}')">📅 Send invite to prospect</button>
@@ -2842,7 +2842,7 @@ async function sendClientCalendarInvite(companyId) {
   const template = state.orgSettings?.calendarInviteTemplate || 'Hi [FirstName],\n\nLooking forward to connecting with you!\n\nBest,\n{{repName}}';
   const description = applyInviteTemplate(template, c).replace('{{repName}}', state.user?.name || '');
   const startTime = new Date(dt).toISOString();
-  const endTime = new Date(new Date(dt).getTime() + 60 * 60000).toISOString();
+  const endTime = new Date(new Date(dt).getTime() + 30 * 60000).toISOString();
   try {
     const res = await fetch('/api/calendar?action=create', {
       method: 'POST',
