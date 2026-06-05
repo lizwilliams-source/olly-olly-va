@@ -802,85 +802,145 @@ state._hsViews = null;
 state._hsViewCompanies = null;
 state._hsActiveView = null;
 
+const HS_FILTER_PROPS = [
+  { label: 'Stage',        prop: 'subscription_status', type: 'enum', values: ['Demo Set','Demo Completed','Contract Sent','Contract Revision','Customer','Lead','MQL','SQL','Opportunity','Other'] },
+  { label: 'Lead Source',  prop: 'lead_source',         type: 'enum', values: ['OFFLINE','ORGANIC_SEARCH','PAID_SEARCH','EMAIL_MARKETING','SOCIAL_MEDIA','REFERRALS','OTHER_CAMPAIGNS','DIRECT_TRAFFIC','PAID_SOCIAL'] },
+  { label: 'Timezone',     prop: 'timezone_',           type: 'text' },
+  { label: 'State',        prop: 'state',               type: 'text' },
+  { label: 'City',         prop: 'city',                type: 'text' },
+  { label: 'Industry',     prop: 'industry',            type: 'text' },
+  { label: 'Owner',        prop: 'hubspot_owner_id',    type: 'owner' },
+  { label: 'Never Called', prop: 'recent_user_to_call', type: 'special' },
+  { label: 'Last Contact', prop: 'notes_last_contacted', type: 'date' },
+];
+
 async function renderHubSpotViews() {
   const main = document.getElementById('main');
-  const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
+  const sel = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none';
   main.innerHTML = `
     <div class="topbar">
-      <div class="topbar-left"><h2>🔭 HS Views</h2><p>Paste a HubSpot view URL to load companies and add to queue</p></div>
+      <div class="topbar-left"><h2>🔭 HS Views</h2><p>Filter companies from HubSpot and add to queue</p></div>
     </div>
-    <div class="content" style="max-width:900px">
+    <div class="content" style="max-width:960px">
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px">
-        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px">Paste a HubSpot view URL</div>
-        <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Go to any company view in HubSpot, copy the URL from your browser, and paste it here.</div>
-        <div style="display:flex;gap:8px">
-          <input id="hs-view-url" placeholder="https://app.hubspot.com/contacts/45530742/objects/0-2/views/..." style="${ta};flex:1" onkeydown="if(event.key==='Enter')loadHubSpotViewFromUrl()" />
-          <button class="btn btn-primary" onclick="loadHubSpotViewFromUrl()">Load →</button>
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px">Build a filter</div>
+        <div id="hs-filter-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-sm" onclick="addHsFilterRow()">+ Add filter</button>
+          <button class="btn btn-primary" onclick="runHsFilter()">Search →</button>
+          <span style="font-size:11px;color:var(--text3);margin-left:4px">All filters combined with AND</span>
         </div>
-        <div id="hs-url-error" style="font-size:12px;color:var(--red);margin-top:6px;display:none"></div>
+
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Quick views</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${['Demo Set','Demo Completed','Contract Sent','Contract Revision'].map(s =>
+              `<button class="btn btn-sm" onclick="loadHubSpotByStage('${s}')">${s}</button>`
+            ).join('')}
+            <button class="btn btn-sm" onclick="loadHsMyCompanies()">My Companies</button>
+            <button class="btn btn-sm" onclick="loadHsNeverCalled()">Never Called</button>
+          </div>
+        </div>
       </div>
       <div id="hs-view-companies">
-        <div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">Paste a view URL above to get started</div>
+        <div style="text-align:center;padding:40px 20px;color:var(--text3);font-size:13px">Use the filter builder or a quick view above</div>
       </div>
     </div>`;
+
+  addHsFilterRow();
 }
 
-async function loadHubSpotViewFromUrl() {
-  const input = document.getElementById('hs-view-url')?.value.trim();
-  const errEl = document.getElementById('hs-url-error');
-  errEl.style.display = 'none';
+function addHsFilterRow() {
+  const container = document.getElementById('hs-filter-rows');
+  const idx = container.children.length;
+  const sel = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none';
+  const div = document.createElement('div');
+  div.id = `hs-filter-row-${idx}`;
+  div.style.cssText = 'display:flex;gap:8px;align-items:center';
+  div.innerHTML = `
+    <select id="hs-fp-${idx}" onchange="updateHsFilterRow(${idx})" style="${sel}">
+      ${HS_FILTER_PROPS.map(p => `<option value="${p.prop}">${p.label}</option>`).join('')}
+    </select>
+    <select id="hs-fo-${idx}" style="${sel}">
+      <option value="EQ">equals</option>
+      <option value="NEQ">not equals</option>
+      <option value="CONTAINS_TOKEN">contains</option>
+      <option value="HAS_PROPERTY">has value</option>
+      <option value="NOT_HAS_PROPERTY">is empty</option>
+    </select>
+    <div id="hs-fv-wrap-${idx}" style="flex:1"><input id="hs-fv-${idx}" placeholder="value" style="${sel};width:100%" /></div>
+    <button onclick="document.getElementById('hs-filter-row-${idx}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:0 4px">×</button>`;
+  container.appendChild(div);
+  updateHsFilterRow(idx);
+}
 
-  // Extract view ID from URL — handles formats like:
-  // /objects/0-2/views/12345/list
-  // /companies/list/view/12345/
-  // /contacts/45530742/objects/0-2/views/12345
-  const match = input.match(/views?\/(\d+)/i) || input.match(/view\/(\d+)/i);
-  if (!match) {
-    errEl.textContent = "Couldn't find a view ID in that URL. Make sure you're copying it directly from your HubSpot browser tab.";
-    errEl.style.display = 'block';
-    return;
+function updateHsFilterRow(idx) {
+  const propSel = document.getElementById(`hs-fp-${idx}`);
+  const valWrap = document.getElementById(`hs-fv-wrap-${idx}`);
+  if (!propSel || !valWrap) return;
+  const def = HS_FILTER_PROPS.find(p => p.prop === propSel.value);
+  const sel = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px;outline:none;width:100%';
+  if (def?.type === 'enum') {
+    valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${sel}">${def.values.map(v => `<option>${v}</option>`).join('')}</select>`;
+  } else if (def?.type === 'owner') {
+    valWrap.innerHTML = `<select id="hs-fv-${idx}" style="${sel}"><option value="${state.ownerId}">Me</option></select>`;
+  } else if (def?.type === 'special') {
+    valWrap.innerHTML = `<span style="font-size:12px;color:var(--text3)">(no value needed)</span><input id="hs-fv-${idx}" type="hidden" value="" />`;
+  } else {
+    valWrap.innerHTML = `<input id="hs-fv-${idx}" placeholder="value" style="${sel}" />`;
   }
-  const viewId = match[1];
-  await loadHubSpotView(viewId, `View ${viewId}`);
 }
 
-async function loadHubSpotView(viewId, viewName) {
-  state._hsActiveView = viewId;
+async function runHsFilter() {
+  const rows = document.getElementById('hs-filter-rows').children;
+  const filters = [];
+  for (const row of rows) {
+    const idx = row.id.replace('hs-filter-row-', '');
+    const prop = document.getElementById(`hs-fp-${idx}`)?.value;
+    const op = document.getElementById(`hs-fo-${idx}`)?.value;
+    const val = document.getElementById(`hs-fv-${idx}`)?.value;
+    if (!prop || !op) continue;
+    const def = HS_FILTER_PROPS.find(p => p.prop === prop);
+    if (def?.type === 'special' && prop === 'recent_user_to_call') {
+      filters.push({ propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] });
+      filters.push({ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId });
+    } else if (op === 'HAS_PROPERTY' || op === 'NOT_HAS_PROPERTY') {
+      filters.push({ propertyName: prop, operator: op });
+    } else if (val) {
+      filters.push({ propertyName: prop, operator: op, value: val });
+    }
+  }
+  if (!filters.length) { toast('Add at least one filter', 'error'); return; }
+
+  const panel = document.getElementById('hs-view-companies');
+  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Searching...</div>`;
+  try {
+    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
+    const data = await res.json();
+    renderHubSpotViewCompanies(data.results || [], `Filter results`, 'custom');
+  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
+}
+
+async function loadHsMyCompanies() {
   const panel = document.getElementById('hs-view-companies');
   panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading...</div>`;
-
-  const propsStr = COMPANY_PROPS.map(p => `properties=${encodeURIComponent(p)}`).join('&');
-
   try {
-    const debug = [];
-
-    // Always run all three and collect results — show debug regardless
-    const [getRes, searchRes, viewDefRes] = await Promise.all([
-      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies?viewId=${viewId}&limit=100&${propsStr}`, Authorization: `Bearer ${state.token}` } }),
-      fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ viewId, filterGroups: [], properties: COMPANY_PROPS, limit: 100 }) }),
-      fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/views/${viewId}`, Authorization: `Bearer ${state.token}` } }),
-    ]);
-
-    const [getData, searchData, viewDef] = await Promise.all([getRes.json(), searchRes.json(), viewDefRes.json()]);
-
-    debug.push(`1. GET ?viewId=${viewId}: HTTP ${getRes.status} | results: ${getData.results?.length ?? 0} | error: ${getData.message || getData.error || 'none'}`);
-    debug.push(`2. POST search viewId: HTTP ${searchRes.status} | results: ${searchData.results?.length ?? 0} | error: ${searchData.message || searchData.error || 'none'}`);
-    debug.push(`3. GET view def: HTTP ${viewDefRes.status} | name: ${viewDef.name || 'none'} | keys: ${Object.keys(viewDef).join(', ')}`);
-
-    panel.innerHTML = `<div style="padding:16px">
-      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px">Debug — view ID: ${viewId}</div>
-      <pre style="font-size:11px;color:var(--text3);background:var(--bg3);padding:10px;border-radius:6px;overflow:auto;white-space:pre-wrap;max-height:200px;margin-bottom:12px">${debug.join('\n\n')}\n\n--- View def ---\n${JSON.stringify(viewDef, null, 2).slice(0, 1000)}</pre>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Quick filters while we sort this out:</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">
-        ${['Demo Set','Demo Completed','Contract Sent','Contract Revision','Customer'].map(s =>
-          `<button class="btn btn-sm" onclick="loadHubSpotByStage('${s}')">${s}</button>`
-        ).join('')}
-      </div>
-    </div>`;
-  } catch (e) {
-    panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Error: ${e.message}</div>`;
-  }
+    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }] }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
+    const data = await res.json();
+    renderHubSpotViewCompanies(data.results || [], 'My Companies', 'myco');
+  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
 }
+
+async function loadHsNeverCalled() {
+  const panel = document.getElementById('hs-view-companies');
+  panel.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Loading...</div>`;
+  try {
+    const res = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/companies/search', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'hubspot_owner_id', operator: 'EQ', value: state.ownerId }, { propertyName: 'recent_user_to_call', operator: 'NOT_IN', values: [state.ownerId] }] }], properties: COMPANY_PROPS, sorts: [{ propertyName: 'lastmodifieddate', direction: 'DESCENDING' }], limit: 100 }) });
+    const data = await res.json();
+    renderHubSpotViewCompanies(data.results || [], 'Never Called', 'never');
+  } catch (e) { panel.innerHTML = `<div style="padding:20px;color:var(--red);font-size:13px">Failed: ${e.message}</div>`; }
+}
+
 
 async function loadHubSpotByStage(stage) {
   const panel = document.getElementById('hs-view-companies');
