@@ -2196,8 +2196,10 @@ if (window.location.search.includes('calendar=connected')) {
 
 // ─── CALL LOGGING MODAL ───────────────────────────────────────────────────────
 async function openCallLogger(companyId) {
-  const c = state.contacts.find(x => x.id === companyId);
-  if (!c) return;
+  const c = state.contacts.find(x => x.id === companyId)
+    || state.queues.flatMap(q => q.companies).find(c => c.id === companyId)
+    || state._hsViewCompanies?.find(c => c.id === companyId)
+    || { id: companyId, name: companyId };
 
   document.getElementById('modal-title').innerHTML = `🎙️ Log Call — ${c.name}`;
   document.getElementById('modal-body').innerHTML = `<div id="call-logger-content"></div>`;
