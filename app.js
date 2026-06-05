@@ -870,9 +870,11 @@ function addHsFilterRow() {
   div.id = `hs-filter-row-${idx}`;
   div.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
   div.innerHTML = `
-    <input id="hs-fp-search-${idx}" placeholder="Search property..." style="${s};width:200px" oninput="filterHsPropOptions(${idx})" onfocus="document.getElementById('hs-fp-dd-${idx}').style.display='block'" />
-    <div id="hs-fp-dd-${idx}" style="display:none;position:absolute;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;max-height:200px;overflow-y:auto;z-index:50;min-width:220px;box-shadow:0 4px 12px rgba(0,0,0,.3)">
-      ${props.map(p => `<div class="hs-prop-opt" data-idx="${idx}" data-prop="${p.prop}" data-label="${p.label.replace(/"/g,'&quot;')}" onclick="selectHsProp(${idx},'${p.prop}','${p.label.replace(/'/g,"\\'")}' )" style="padding:7px 12px;cursor:pointer;font-size:13px;color:var(--text)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">${p.label} <span style="font-size:10px;color:var(--text3)">${p.prop}</span></div>`).join('')}
+    <div style="position:relative;flex-shrink:0">
+      <input id="hs-fp-search-${idx}" placeholder="Search property..." style="${s};width:200px" oninput="filterHsPropOptions(${idx})" onfocus="document.getElementById('hs-fp-dd-${idx}').style.display='block'" />
+      <div id="hs-fp-dd-${idx}" style="display:none;position:absolute;top:100%;left:0;margin-top:2px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;max-height:200px;overflow-y:auto;z-index:50;min-width:220px;box-shadow:0 4px 12px rgba(0,0,0,.3)">
+        ${props.map(p => `<div class="hs-prop-opt" data-idx="${idx}" data-prop="${p.prop}" data-label="${p.label.replace(/"/g,'&quot;')}" onmousedown="event.preventDefault();selectHsProp(${idx},'${p.prop}','${p.label.replace(/'/g,"\\'")}' )" style="padding:7px 12px;cursor:pointer;font-size:13px;color:var(--text)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">${p.label} <span style="font-size:10px;color:var(--text3)">${p.prop}</span></div>`).join('')}
+      </div>
     </div>
     <input id="hs-fp-${idx}" type="hidden" value="" />
     <select id="hs-fo-${idx}" style="${s}">
