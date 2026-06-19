@@ -1247,13 +1247,6 @@ async function renderMyQueue() {
   const activeQueue = state.queues.find(q => q.id === state.activeQueueId) || state.queues[0];
   const companies = activeQueue?.companies || [];
   const totalCompanies = state.queues.reduce((s, q) => s + q.companies.length, 0);
-  state._queueIdx = Math.min(state._queueIdx || 0, Math.max(0, companies.length - 1));
-  const idx = state._queueIdx;
-  const c = companies[idx];
-  const contact = c ? (state.contacts.find(x => x.id === c.id) || null) : null;
-  const hsUrl = c ? `https://app.hubspot.com/contacts/45530742/company/${c.id}` : '';
-  const cleanPhone = (c?.phone || '').replace(/\D/g, '');
-  const ta = 'background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;width:100%;min-height:72px;resize:vertical';
 
   const queueTabs = state.queues.map(q => `
     <div style="display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:${q.id === activeQueue?.id ? 'var(--purple)' : 'var(--bg3)'};color:${q.id === activeQueue?.id ? 'white' : 'var(--text2)'};cursor:pointer;font-size:12px;font-weight:600;border:1px solid ${q.id === activeQueue?.id ? 'transparent' : 'var(--border)'}" onclick="switchQueue('${q.id}')">
@@ -1261,6 +1254,30 @@ async function renderMyQueue() {
       <span onclick="event.stopPropagation();promptRenameQueue('${q.id}','${q.name.replace(/'/g,"\\'")}')">✏️</span>
       ${state.queues.length > 1 ? `<span onclick="event.stopPropagation();deleteQueue('${q.id}')">✕</span>` : ''}
     </div>`).join('');
+
+  const rows = companies.map((c, i) => {
+    const contact = state.contacts.find(x => x.id === c.id) || null;
+    const subtitle = [contact?.city && contact?.state ? contact.city+', '+contact.state : '', contact?.masterStage || contact?.stage || '', contact?.leadSource || ''].filter(Boolean).join(' · ');
+    const cleanPhone = (c.phone || '').replace(/\D/g, '');
+    const hsUrl = `https://app.hubspot.com/contacts/45530742/company/${c.id}`;
+    return `
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
+        <div style="width:22px;text-align:center;font-size:12px;color:var(--text3);flex-shrink:0;font-weight:600">${i + 1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</div>
+          ${subtitle ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${subtitle}</div>` : ''}
+        </div>
+        <div style="flex-shrink:0">
+          ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-size:13px;font-weight:600">📞 ${c.phone}</a>` : '<span style="color:var(--text3);font-size:12px">No phone</span>'}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <a href="${hsUrl}" target="_blank" class="btn btn-sm" style="font-size:11px">HS ↗</a>
+          <button class="btn btn-sm" onclick="openContact('${c.id}')" ${!contact ? 'disabled title="Not in your contacts list"' : ''} style="font-size:11px">Profile</button>
+          <button class="btn btn-sm" onclick="openSetDemoNotes('${c.id}')" style="font-size:11px;color:var(--green);border-color:rgba(62,207,142,.3)">🎯 Demo</button>
+          <button class="btn btn-sm" onclick="removeFromQueue('${c.id}','${activeQueue.id}')" style="font-size:11px;color:var(--red);border-color:rgba(240,82,82,.3)">✕</button>
+        </div>
+      </div>`;
+  }).join('');
 
   document.getElementById('main').innerHTML = `
     <div class="topbar">
@@ -1270,46 +1287,13 @@ async function renderMyQueue() {
         ${activeQueue ? `<button class="btn" onclick="clearQueue('${activeQueue.id}')">🗑 Clear</button>` : ''}
       </div>
     </div>
-    <div class="content" style="max-width:640px">
+    <div class="content" style="max-width:760px">
       <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
         ${state.queues.length === 0 ? '<div style="font-size:13px;color:var(--text2)">No queues yet.</div>' : queueTabs}
       </div>
       ${companies.length === 0
         ? `<div class="empty-state">${state.queues.length === 0 ? 'Create a queue first.' : 'This queue is empty. Add companies from HS Views.'}</div>`
-        : `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <button class="btn btn-sm" onclick="queueNav(-1)" ${idx <= 0 ? 'disabled' : ''}>← Prev</button>
-            <span style="font-size:13px;color:var(--text2);font-weight:600">${idx + 1} of ${companies.length}</span>
-            <button class="btn btn-sm" onclick="queueNav(1)" ${idx >= companies.length - 1 ? 'disabled' : ''}>Next →</button>
-          </div>
-          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:20px">
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px">
-              <div style="min-width:0">
-                <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:4px">${c.name}</div>
-                <div style="font-size:12px;color:var(--text3)">${[contact?.city && contact?.state ? contact.city+', '+contact.state : '', contact?.masterStage || contact?.stage || '', contact?.leadSource || ''].filter(Boolean).join(' · ')}</div>
-              </div>
-              <div style="display:flex;gap:6px;flex-shrink:0">
-                <a href="${hsUrl}" target="_blank" class="btn btn-sm" style="font-size:11px">HS ↗</a>
-                <a href="https://www.google.com/search?q=${encodeURIComponent(c.name)}" target="_blank" class="btn btn-sm" style="font-size:11px">🔍 Google</a>
-              </div>
-            </div>
-            <div style="margin-bottom:16px">
-              ${c.phone ? `<a href="tel:${cleanPhone}" style="color:var(--green);text-decoration:none;font-weight:700;font-size:17px">📞 ${c.phone}</a>` : '<span style="color:var(--text3);font-size:13px">No phone on file</span>'}
-            </div>
-            <div style="border-top:1px solid var(--border);padding-top:14px;margin-bottom:14px">
-              <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Log a note</div>
-              <textarea id="queue-note-input" placeholder="Add a call note, meeting summary..." style="${ta}"></textarea>
-              <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="saveQueueNote('${c.id}')">Save to HubSpot</button>
-            </div>
-            <div style="border-top:1px solid var(--border);padding-top:14px">
-              <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Notes</div>
-              <div id="queue-notes-area" style="font-size:12px;color:var(--text3)">Loading...</div>
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between">
-            <button class="btn btn-sm" style="color:var(--red);border-color:rgba(240,82,82,.3)" onclick="removeFromQueue('${c.id}','${activeQueue.id}')">Remove</button>
-            <button class="btn btn-sm" onclick="openSetDemoNotes('${c.id}')" style="color:var(--green);border-color:rgba(62,207,142,.3)">🎯 Set demo</button>
-            <button class="btn btn-sm" onclick="openContact('${c.id}')" ${!contact ? 'disabled title="Not in your contacts list"' : ''}>View full profile</button>
-          </div>`}
+        : rows}
     </div>`;
 
   if (c) loadQueueNotes(c.id);
