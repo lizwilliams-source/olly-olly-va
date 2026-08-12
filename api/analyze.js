@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    const { transcript, companyName, callType = 'general', includeCoaching = false } = req.body;
+    const { transcript, companyName, callType = 'general', includeCoaching = false, segments, repName } = req.body;
     if (!transcript) return res.status(400).json({ error: 'No transcript provided' });
 
     const baseFields = `
@@ -62,13 +62,22 @@ const coachingFields = `
       demo: `,\n${demoFields}`,
     }[callType] || '';
 
-    const extraFields = typeFields + (includeCoaching ? `,\n${coachingFields}` : '');
+    // Speaker identification: infer from conversational content (introductions, turn-taking,
+    // question/answer patterns) rather than audio-based diarization — no separate voice model needed.
+    const hasSegments = Array.isArray(segments) && segments.length > 0;
+    const speakerField = hasSegments ? `,\n  "speakerLabels": ["array of exactly ${segments.length} strings, one per numbered segment below, in order — each is either the rep's name, the prospect's real name if it can be inferred from what's said, or \\"Prospect\\" if their name is never stated"]` : '';
+
+    const extraFields = typeFields + (includeCoaching ? `,\n${coachingFields}` : '') + speakerField;
+
+    const segmentBlock = hasSegments
+      ? `\n\nThe call has exactly two speakers: the sales rep (name: ${repName || 'unknown — infer from context, e.g. how they introduce themselves'}) and the prospect. Here are the transcript segments in chronological order, numbered — use introductions, turn-taking, and who's asking vs answering questions to figure out who said each one:\n${segments.map((s, i) => `${i + 1}. "${s.text}"`).join('\n')}`
+      : '';
 
     const prompt = `You are analyzing a sales call transcript for an SEO agency that sells to home service contractors.
 
 Company: ${companyName || 'Unknown'}
 Call Type: ${callType}
-Transcript: ${transcript}
+Transcript: ${transcript}${segmentBlock}
 
 Extract and return ONLY a JSON object with these fields, no other text:
 {
@@ -112,6 +121,10 @@ ${baseFields}${extraFields}
       analysis = JSON.parse(jsonMatch ? jsonMatch[0] : clean);
     } catch {
       analysis = { summary: 'Could not parse analysis', callNotes: analysisText };
+    }
+
+    if (hasSegments && (!Array.isArray(analysis.speakerLabels) || analysis.speakerLabels.length !== segments.length)) {
+      analysis.speakerLabels = null;
     }
 
     return res.status(200).json({ analysis });

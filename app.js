@@ -2466,9 +2466,10 @@ async function handleAudioUpload(companyId) {
   try {
     const cacheKey = `transcript_${file.name}_${file.size}_${file.lastModified}`;
     let transcript = null;
+    let segments = null;
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
-      transcript = cached;
+      try { ({ transcript, segments } = JSON.parse(cached)); } catch { transcript = cached; }
       document.getElementById('transcribe-status').textContent = 'Using cached transcript...';
     } else {
       // Get whisper server config
@@ -2499,7 +2500,7 @@ async function handleAudioUpload(companyId) {
         });
         const statusData = await statusRes.json();
         if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
-        if (statusData.status === 'done') { transcript = statusData.transcript; break; }
+        if (statusData.status === 'done') { transcript = statusData.transcript; segments = statusData.segments || null; break; }
         const elapsed = Math.round((Date.now() - transcribeStart) / 1000);
         const progress = Math.min(90, (elapsed / 180) * 90);
         const bar = document.getElementById('transcribe-bar');
@@ -2508,7 +2509,7 @@ async function handleAudioUpload(companyId) {
         if (elapsedEl) elapsedEl.textContent = `${elapsed}s`;
       }
 
-      try { localStorage.setItem(cacheKey, transcript); } catch {}
+      try { localStorage.setItem(cacheKey, JSON.stringify({ transcript, segments })); } catch {}
     }
 
     // Analyze with Claude
@@ -2518,11 +2519,12 @@ async function handleAudioUpload(companyId) {
     const analysisRes = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false }),
+      body: JSON.stringify({ transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false, segments, repName: state.user?.name }),
     });
     const analysisJson = await analysisRes.json();
     if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error || JSON.stringify(analysisJson)}`);
     const { analysis } = analysisJson;
+    analysis._segments = segments;
 
     state.transcribing = false;
     showCallAnalysis(companyId, transcript, analysis);
@@ -2544,6 +2546,8 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = [], isRe
   state._currentAnalysis = analysis;
   state._currentPriorNotes = priorNotes;
   state._currentCompanyId = companyId;
+  state._currentSegments = analysis._segments || null;
+  state._currentSpeakerLabels = analysis.speakerLabels || null;
 
   // Store transcript + analysis for email template use
   state.lastCallContext = `TRANSCRIPT:\n${transcript}\n\nANALYSIS SUMMARY:\n${analysis.summary || ''}\nInterested: ${analysis.interested}\nSentiment: ${analysis.sentiment || ''}${analysis.followUpCommitment ? '\nFollow-up: ' + analysis.followUpCommitment : ''}`;
@@ -2831,12 +2835,33 @@ async function saveCallNotes(companyId) {
   }
 }
 
+// Groups consecutive same-speaker segments into turns using the labels Claude inferred from
+// conversational content (introductions, turn-taking) — not audio-based voice diarization.
+function buildSpeakerTurns() {
+  const segments = state._currentSegments;
+  const labels = state._currentSpeakerLabels;
+  if (!Array.isArray(segments) || !Array.isArray(labels) || segments.length !== labels.length || segments.length === 0) return null;
+  const turns = [];
+  for (let i = 0; i < segments.length; i++) {
+    const speaker = labels[i] || 'Unknown';
+    const text = (segments[i].text || '').trim();
+    if (!text) continue;
+    if (turns.length && turns[turns.length - 1].speaker === speaker) turns[turns.length - 1].text += ' ' + text;
+    else turns.push({ speaker, text });
+  }
+  return turns.length ? turns : null;
+}
+
 function showTranscript(companyId) {
   const transcript = state._currentTranscript || '(no transcript available)';
+  const turns = buildSpeakerTurns();
+  const bodyHtml = turns
+    ? turns.map(t => `<div style="margin-bottom:10px"><span style="color:var(--blue);font-weight:600">${t.speaker}:</span> ${t.text}</div>`).join('')
+    : `<div style="white-space:pre-wrap">${transcript}</div>`;
   document.getElementById('call-logger-content').innerHTML = `
     <div>
-      <div class="field-label" style="margin-bottom:8px">Full Transcript</div>
-      <div style="background:var(--bg3);border-radius:6px;padding:12px;font-size:12px;color:var(--text2);line-height:1.8;max-height:400px;overflow-y:auto;white-space:pre-wrap">${transcript}</div>
+      <div class="field-label" style="margin-bottom:8px">Full Transcript${turns ? ' · speakers identified by AI' : ''}</div>
+      <div style="background:var(--bg3);border-radius:6px;padding:12px;font-size:12px;color:var(--text2);line-height:1.8;max-height:400px;overflow-y:auto">${bodyHtml}</div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="btn" style="flex:1;justify-content:center" onclick="showCallAnalysis('${companyId}', state._currentTranscript, state._currentAnalysis, state._currentPriorNotes, true)">← Back</button>
         <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveTranscriptToHubSpot('${companyId}')">💾 Save Transcript to HubSpot</button>
@@ -2848,9 +2873,11 @@ function showTranscript(companyId) {
 async function saveTranscriptToHubSpot(companyId) {
   const transcript = state._currentTranscript;
   if (!transcript) { toast('No transcript to save', 'error'); return; }
+  const turns = buildSpeakerTurns();
+  const bodyText = turns ? turns.map(t => `${t.speaker}: ${t.text}`).join('\n\n') : transcript;
   try {
     await hsPost('/crm/v3/objects/notes', {
-      properties: { hs_note_body: `Call Transcript (${state.lastCallDate || new Date().toLocaleDateString()}):\n\n${transcript}`, hs_timestamp: Date.now() },
+      properties: { hs_note_body: `Call Transcript (${state.lastCallDate || new Date().toLocaleDateString()}):\n\n${bodyText}`, hs_timestamp: Date.now() },
       associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
     });
     const msg = document.getElementById('transcript-save-msg');
@@ -3163,11 +3190,12 @@ async function useHubSpotRecording(companyId, encodedUrl) {
         const analysisRes = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
-          body: JSON.stringify({ transcript: statusData.transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false }),
+          body: JSON.stringify({ transcript: statusData.transcript, companyName: c.name, callType: state.selectedCallType || 'general', includeCoaching: state.coachingEnabled || false, segments: statusData.segments || null, repName: state.user?.name }),
         });
         const analysisJson = await analysisRes.json();
         if (!analysisRes.ok) throw new Error(`Analysis failed: ${analysisJson.error}`);
         state.transcribing = false;
+        analysisJson.analysis._segments = statusData.segments || null;
         showCallAnalysis(companyId, statusData.transcript, analysisJson.analysis);
         return;
       }
@@ -3835,8 +3863,13 @@ async function processCallRecordingWithFile(companyId, file, companyNameOverride
   state.transcribing = true;
   try {
     const cacheKey = `transcript_${file.name}_${file.size}_${file.lastModified}`;
-    let transcript = localStorage.getItem(cacheKey);
-    if (transcript) { document.getElementById('transcribe-status').textContent = 'Using cached transcript...'; }
+    let transcript = null;
+    let segments = null;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try { ({ transcript, segments } = JSON.parse(cached)); } catch { transcript = cached; }
+      document.getElementById('transcribe-status').textContent = 'Using cached transcript...';
+    }
     else {
       const { url: whisperUrl, key: whisperKey } = await fetch('/api/transcribe').then(r => r.json());
       document.getElementById('transcribe-status').textContent = 'Uploading...';
@@ -3852,19 +3885,20 @@ async function processCallRecordingWithFile(companyId, file, companyNameOverride
         await new Promise(r => setTimeout(r, 3000));
         const statusData = await fetch(`${whisperUrl}/status/${job_id}`, { headers: { 'Authorization': `Bearer ${whisperKey}` } }).then(r => r.json());
         if (statusData.status === 'error') throw new Error(statusData.error || 'Transcription failed');
-        if (statusData.status === 'done') { transcript = statusData.transcript; break; }
+        if (statusData.status === 'done') { transcript = statusData.transcript; segments = statusData.segments || null; break; }
         const elapsed = Math.round((Date.now() - t0) / 1000);
         document.getElementById('transcribe-bar').style.width = `${Math.min(90, (elapsed/180)*90)}%`;
         document.getElementById('transcribe-elapsed').textContent = `${elapsed}s`;
       }
-      try { localStorage.setItem(cacheKey, transcript); } catch {}
+      try { localStorage.setItem(cacheKey, JSON.stringify({ transcript, segments })); } catch {}
     }
     document.getElementById('transcribe-bar').style.width = '100%';
     document.getElementById('transcribe-status').textContent = 'Analyzing with AI...';
-    const analysisRes = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ transcript, companyName, callType }) });
+    const analysisRes = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ transcript, companyName, callType, segments, repName: state.user?.name }) });
     const analysisJson = await analysisRes.json();
     if (!analysisRes.ok) throw new Error(analysisJson.error || 'Analysis failed');
     state.transcribing = false;
+    analysisJson.analysis._segments = segments;
     showCallAnalysis(companyId || '__standalone__', transcript, analysisJson.analysis);
   } catch (e) {
     state.transcribing = false;

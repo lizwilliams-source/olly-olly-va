@@ -28,9 +28,10 @@ def run_transcription(job_id: str, audio_bytes: bytes):
         f.write(audio_bytes)
         tmp = f.name
     try:
-        segments, _ = model.transcribe(tmp, beam_size=5)
-        transcript = " ".join(s.text.strip() for s in segments)
-        jobs[job_id] = {"status": "done", "transcript": transcript, "elapsed": round(time.time() - start)}
+        raw_segments, _ = model.transcribe(tmp, beam_size=5)
+        seg_list = [{"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()} for s in raw_segments]
+        transcript = " ".join(s["text"] for s in seg_list)
+        jobs[job_id] = {"status": "done", "transcript": transcript, "segments": seg_list, "elapsed": round(time.time() - start)}
     except Exception as e:
         jobs[job_id] = {"status": "error", "error": str(e)}
     finally:
