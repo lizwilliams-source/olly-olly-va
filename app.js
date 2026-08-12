@@ -1791,8 +1791,14 @@ async function loadUsageDashboard(month) {
   const el = document.getElementById('usage-table');
   if (!el) return;
   el.innerHTML = '<span class="spinner"></span> Loading...';
-  const res = await fetch(`/api/usage?month=${month}`, { headers: { Authorization: `Bearer ${state.token}` } });
-  const { rows } = await res.json();
+  let rows;
+  try {
+    const res = await fetch(`/api/usage?month=${month}`, { headers: { Authorization: `Bearer ${state.token}` } });
+    ({ rows } = await res.json());
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);font-size:13px">Failed to load usage: ${e.message}</div>`;
+    return;
+  }
   if (!rows?.length) { el.innerHTML = '<div style="color:var(--text3);font-size:13px">No usage data for this month yet.</div>'; return; }
   const fmt = n => n < 0.01 ? `<$0.01` : `$${n.toFixed(2)}`;
   const fmtTokens = n => n >= 1_000_000 ? `${(n/1_000_000).toFixed(2)}M` : n >= 1000 ? `${(n/1000).toFixed(1)}k` : `${n}`;
@@ -1909,10 +1915,16 @@ async function bulkAddUsers() {
 }
 
 async function loadUserList() {
-  const res = await fetch('/api/users?action=list', { headers: { Authorization: `Bearer ${state.token}` } });
-  const users = await res.json();
   const list = document.getElementById('user-list');
-  if (!Array.isArray(users)) { list.innerHTML = '<div style="color:var(--red);font-size:13px">Failed to load users</div>'; return; }
+  let users;
+  try {
+    const res = await fetch('/api/users?action=list', { headers: { Authorization: `Bearer ${state.token}` } });
+    users = await res.json();
+  } catch (e) {
+    if (list) list.innerHTML = `<div style="color:var(--red);font-size:13px">Failed to load users: ${e.message}</div>`;
+    return;
+  }
+  if (!Array.isArray(users)) { list.innerHTML = `<div style="color:var(--red);font-size:13px">Failed to load users: ${users?.error || 'unknown error'}</div>`; return; }
   list.innerHTML = users.map(u => `
     <div style="padding:12px 0;border-bottom:1px solid var(--border)">
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:center">
@@ -2522,17 +2534,24 @@ async function handleAudioUpload(companyId) {
   }
 }
 
-function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
+function showCallAnalysis(companyId, transcript, analysis, priorNotes = [], isRerender = false) {
+  // Stash raw args so the transcript view can navigate back without re-triggering saves
+  state._currentTranscript = transcript;
+  state._currentAnalysis = analysis;
+  state._currentPriorNotes = priorNotes;
+  state._currentCompanyId = companyId;
+
   // Store transcript + analysis for email template use
   state.lastCallContext = `TRANSCRIPT:\n${transcript}\n\nANALYSIS SUMMARY:\n${analysis.summary || ''}\nInterested: ${analysis.interested}\nSentiment: ${analysis.sentiment || ''}${analysis.followUpCommitment ? '\nFollow-up: ' + analysis.followUpCommitment : ''}`;
   state.lastCallCompanyId = companyId;
   state.lastCallDate = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
-  // Auto-save to KV (only when there's real transcript content)
-  if (transcript) fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text: state.lastCallContext, date: new Date().toLocaleString(), type: 'call_transcript' }) }).catch(() => {});
   if (!state.notes) state.notes = {};
   if (!state.notes[companyId]) state.notes[companyId] = [];
-  if (!state.notes[companyId].find(n => n.type === 'call_transcript' && n.date === new Date().toLocaleString()))
+  // Auto-save summary+transcript to the app's own note history (not HubSpot) once per call, not on Back navigation
+  if (!isRerender) {
+    if (transcript) fetch('/api/users?action=savenote', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ companyId, text: state.lastCallContext, date: new Date().toLocaleString(), type: 'call_transcript' }) }).catch(() => {});
     state.notes[companyId].unshift({ text: state.lastCallContext, date: new Date().toLocaleString(), type: 'call_transcript' });
+  }
 
   const c = state.contacts.find(x => x.id === companyId);
   const followUpDate = analysis.followUpDate ? new Date(analysis.followUpDate) : null;
@@ -2567,7 +2586,7 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = []) {
   const saveBar = `
     <div style="display:flex;gap:8px">
       <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveCallNotes('${companyId}')">💾 Save to HubSpot</button>
-      <button class="btn" style="flex:1;justify-content:center" onclick="showTranscript(\`${transcript.replace(/`/g, '\\`').replace(/\$/g, '\\$').slice(0, 5000)}\`)">📄 Transcript</button>
+      <button class="btn" style="flex:1;justify-content:center" onclick="showTranscript('${companyId}')">📄 Transcript</button>
     </div>`;
 
   let typeBlock = '';
@@ -2808,12 +2827,34 @@ async function saveCallNotes(companyId) {
   }
 }
 
-function showTranscript(transcript) {
+function showTranscript(companyId) {
+  const transcript = state._currentTranscript || '(no transcript available)';
   document.getElementById('call-logger-content').innerHTML = `
     <div>
       <div class="field-label" style="margin-bottom:8px">Full Transcript</div>
       <div style="background:var(--bg3);border-radius:6px;padding:12px;font-size:12px;color:var(--text2);line-height:1.8;max-height:400px;overflow-y:auto;white-space:pre-wrap">${transcript}</div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn" style="flex:1;justify-content:center" onclick="showCallAnalysis('${companyId}', state._currentTranscript, state._currentAnalysis, state._currentPriorNotes, true)">← Back</button>
+        <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="saveTranscriptToHubSpot('${companyId}')">💾 Save Transcript to HubSpot</button>
+      </div>
+      <div id="transcript-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
     </div>`;
+}
+
+async function saveTranscriptToHubSpot(companyId) {
+  const transcript = state._currentTranscript;
+  if (!transcript) { toast('No transcript to save', 'error'); return; }
+  try {
+    await hsPost('/crm/v3/objects/notes', {
+      properties: { hs_note_body: `Call Transcript (${state.lastCallDate || new Date().toLocaleDateString()}):\n\n${transcript}`, hs_timestamp: Date.now() },
+      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
+    });
+    const msg = document.getElementById('transcript-save-msg');
+    if (msg) msg.textContent = '✓ Transcript saved to HubSpot!';
+    toast('Transcript saved to HubSpot ✓', 'success');
+  } catch {
+    toast('Failed to save transcript', 'error');
+  }
 }
 
 function setScore(area, score) {
