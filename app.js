@@ -4229,6 +4229,119 @@ Return ONLY JSON: { "subject": "...", "body": "..." }. Body uses plain \\n, no m
   }
 }
 
+function toggleDaePackagePrice(key) {
+  const checked = document.getElementById(`dae-pkg-${key}`)?.checked;
+  const priceRow = document.getElementById(`dae-price-row-${key}`);
+  if (priceRow) priceRow.style.display = checked ? 'flex' : 'none';
+  updateDaeRecommendOptions();
+}
+
+function updateDaeRecommendOptions() {
+  const container = document.getElementById('dae-recommend-container');
+  if (!container) return;
+  const checkedKeys = Object.keys(DEMO_PACKAGE_INFO).filter(k => document.getElementById(`dae-pkg-${k}`)?.checked);
+  if (!checkedKeys.length) { container.innerHTML = `<div style="font-size:11px;color:var(--text3)">Check at least one package above</div>`; return; }
+  const currentlyChecked = container.querySelector('input[name="dae-recommend"]:checked')?.value;
+  container.innerHTML = checkedKeys.map(k => `
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer">
+      <input type="radio" name="dae-recommend" value="${k}" ${(currentlyChecked === k) || (!currentlyChecked && k === checkedKeys[0]) ? 'checked' : ''} /> ${DEMO_PACKAGE_INFO[k].name}
+    </label>`).join('');
+}
+
+function toggleDaeWebsiteExample() {
+  const checked = document.getElementById('dae-sec-website')?.checked;
+  const row = document.getElementById('dae-website-example-row');
+  if (row) row.style.display = checked ? 'block' : 'none';
+}
+
+async function generateDemoAsEmail(companyId) {
+  const c = state.contacts.find(x => x.id === companyId);
+  const meta = state._demoEmailMeta || {};
+  const senderName = state.user?.name || '[Your Name]';
+  const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
+
+  const prospectName = document.getElementById('dae-prospect-name')?.value.trim() || '';
+
+  const notesList = state.notes?.[companyId] || [];
+  const selectedNotes = notesList.filter((n, i) => document.getElementById(`dae-note-${i}`)?.checked);
+  const notesContext = selectedNotes.map(n => `[${n.date}${n.type ? ' · ' + n.type : ''}]\n${n.text}`).join('\n---\n');
+
+  const quotedPackages = Object.keys(DEMO_PACKAGE_INFO).filter(k => document.getElementById(`dae-pkg-${k}`)?.checked);
+  if (!quotedPackages.length) { toast('Check at least one package', 'error'); return; }
+  const recommendedKey = document.querySelector('input[name="dae-recommend"]:checked')?.value || quotedPackages[0];
+  const packagesInfo = quotedPackages.map(k => {
+    const price = document.getElementById(`dae-price-${k}`)?.value.trim() || '(price not entered — ask the rep, don\'t invent one)';
+    return `${DEMO_PACKAGE_INFO[k].name} — $${price}/month${k === recommendedKey ? ' [THIS IS THE ONE TO CONFIDENTLY RECOMMEND]' : ''}\n${DEMO_PACKAGE_INFO[k].blurb}`;
+  }).join('\n\n');
+
+  const selectedSections = Object.keys(DEMO_SECTIONS).filter(k => document.getElementById(`dae-sec-${k}`)?.checked);
+  if (!selectedSections.length) { toast('Check at least one section to include', 'error'); return; }
+  const sectionsContext = selectedSections.map(k => `### ${DEMO_SECTIONS[k].label}\n${DEMO_SECTIONS[k].reference}`).join('\n\n');
+  const websiteExample = document.getElementById('dae-website-example')?.value.trim() || '';
+
+  document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Writing demo email...</div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','demo_as_email')">← Back</button>`;
+
+  try {
+    const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
+      system: `You write "demo as an email" pitches for Olly Olly, an SEO agency selling to home service contractors. This replaces a live demo call for a prospect who won't get on one — so unlike a short follow-up, it needs to carry the substance of a full demo, but stay tight and readable, not a wall of text.
+
+STRUCTURE:
+1. Warm, direct opener. Summarize their pain points in your own words (from the notes provided) and end with one confidence-building sentence about how we help — no fluff, no "I hope this finds you well."
+2. One short section per included topic below. Give each a bolded one-line header (plain text, e.g. "Your Google Business Profile:"), then 2-4 sentences that naturally cover: what's currently wrong for them specifically, what that's costing them, how we fix it, and what that gets them toward their goals. Don't label these as WRONG/COSTING/FIX/HELP — blend them into natural prose. Use their actual situation from the notes wherever possible instead of generic language.
+3. A short timeline/expectations paragraph — reassuring, confident tone, not a bulleted itinerary.
+4. Package wrap-up: list the quoted package(s) with price, but highlight what meaningfully differs between them rather than listing every feature. Then confidently recommend the flagged package with one clear reason tied to their specific situation.
+
+RULES:
+- No corporate words: no "leverage", "synergy", "circle back", "moving forward", "touch base", "reach out"
+- No filler: no "I hope this finds you well", no "as per our conversation", no "please don't hesitate"
+- Start with "Hey [First Name]," or "Hi [First Name],"
+- Sign off is JUST: [Name] / National Account Executive / Olly Olly — nothing else
+- Longer than a normal follow-up is fine and expected — this is standing in for the whole demo — but keep every sentence earning its place
+- Never invent a package price — use exactly what's provided`,
+      messages: [{ role: 'user', content: `Rep: ${senderName}
+Prospect name: ${prospectName || '[First Name]'}
+Company: ${c?.name || ''}
+
+Notes/transcripts to derive pain points and specifics from:
+${notesContext || '(none selected — write generically based on section reference material only)'}
+
+Sections to include, with reference material for what's typically wrong / what it costs / how we fix it / what it helps with — adapt this to their specific situation using the notes above, don't just restate it generically:
+${sectionsContext}
+${websiteExample ? `\nClient example to weave naturally into the Website section: ${websiteExample}` : ''}
+
+Timeline & CS expectations reference (use to write the timeline paragraph, don't just list it verbatim):
+${DEMO_TIMELINE_REFERENCE}
+
+Packages quoted:
+${packagesInfo}
+
+Return ONLY JSON: { "subject": "...", "body": "..." }. Body uses plain \\n between paragraphs, no markdown formatting except plain-text section headers as standalone lines (no ** or #).` }],
+      max_tokens: 2500,
+    })});
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '';
+    let subject = '', body = '';
+    try { const p = JSON.parse(text.replace(/```json|```/g,'').trim()); subject = p.subject || ''; body = p.body || text; }
+    catch { subject = `How Olly Olly can help ${c?.name || 'you'} get more calls`; body = text; }
+
+    state._emailImages = [];
+    document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
+      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" value="${meta.contactEmail || ''}" placeholder="recipient@example.com" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:400px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
+    </div>`;
+    document.getElementById('modal-footer').innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','demo_as_email')">← Back</button>
+      <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
+      <button class="btn btn-sm" onclick="openMailto()">↗ Open in Gmail</button>
+      <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send</button>`;
+  } catch (e) {
+    document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
+    document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','demo_as_email')">← Back</button>`;
+  }
+}
+
 async function generateEmailDraft(companyId) {
   const c = state.contacts.find(x => x.id === companyId);
   const displayNotes = state._emailNotes || [];
@@ -4431,7 +4544,94 @@ async function applyEmailTemplate(companyId, templateId) {
     }
     return;
   }
-  // ── END DEMO TEMPLATES ──────────────────────────────────────────────────────
+  // ── END DEMO FOLLOW-UP TEMPLATES ────────────────────────────────────────────
+
+  // ── DEMO AS AN EMAIL ────────────────────────────────────────────────────────
+  if (templateId === 'demo_as_email') {
+    try {
+      try {
+        const nr = await fetch(`/api/users?action=getnotes&companyId=${companyId}`, { headers: { Authorization: `Bearer ${state.token}` } });
+        if (nr.ok) { const { notes: kv } = await nr.json(); if (!state.notes) state.notes = {}; state.notes[companyId] = kv || []; }
+      } catch {}
+
+      const contactIds = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/contacts`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({}));
+      const firstContactId = (contactIds.results || [])[0]?.id;
+      const contactDetail = firstContactId ? await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/contacts/${firstContactId}?properties=firstname,lastname,email`, Authorization: `Bearer ${state.token}` } }).then(r => r.json()).catch(() => ({})) : {};
+      const firstName = contactDetail?.properties?.firstname || '';
+      const contactEmail = contactDetail?.properties?.email || '';
+
+      const notesList = state.notes?.[companyId] || [];
+      state._demoEmailMeta = { companyId, templateId, contactEmail, firstName };
+
+      document.getElementById('modal-body').innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div style="font-size:12px;color:var(--text3)">Sent to: <strong style="color:var(--text)">${c.name}</strong> — rep: <strong style="color:var(--text)">${state.user?.name || '[Your Name]'}</strong></div>
+
+          <div>
+            <div class="field-label" style="margin-bottom:4px">Prospect's name</div>
+            <input id="dae-prospect-name" value="${(firstName || '').replace(/"/g,'&quot;')}" placeholder="e.g. John" style="${ta}" />
+          </div>
+
+          <div>
+            <div class="field-label" style="margin-bottom:6px">Notes / transcripts to pull from</div>
+            ${notesList.length ? `<div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px">
+              ${notesList.slice(0, 20).map((n, i) => `
+                <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--text2);cursor:pointer">
+                  <input type="checkbox" id="dae-note-${i}" style="margin-top:2px;flex-shrink:0" />
+                  <span><strong style="color:var(--text3)">[${n.date}${n.type ? ' · ' + n.type : ''}]</strong> ${(n.text || '').slice(0, 120).replace(/</g,'&lt;')}${(n.text || '').length > 120 ? '…' : ''}</span>
+                </label>`).join('')}
+            </div>` : `<div style="font-size:11px;color:var(--amber)">No saved notes/transcripts found for this company yet — the email will lean on the general reference material only.</div>`}
+          </div>
+
+          <div>
+            <div class="field-label" style="margin-bottom:6px">Package(s) quoted</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              ${Object.entries(DEMO_PACKAGE_INFO).map(([k, p]) => `
+                <div>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer">
+                    <input type="checkbox" id="dae-pkg-${k}" onchange="toggleDaePackagePrice('${k}')" /> ${p.name}
+                  </label>
+                  <div id="dae-price-row-${k}" style="display:none;align-items:center;gap:6px;margin:4px 0 0 22px">
+                    <span style="font-size:11px;color:var(--text3)">$</span>
+                    <input type="number" id="dae-price-${k}" placeholder="0" style="width:100px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:6px 8px;color:var(--text);font-size:12px;outline:none" />
+                    <span style="font-size:11px;color:var(--text3)">/month</span>
+                  </div>
+                </div>`).join('')}
+            </div>
+          </div>
+
+          <div>
+            <div class="field-label" style="margin-bottom:6px">Which one do you want to confidently recommend?</div>
+            <div id="dae-recommend-container" style="display:flex;flex-direction:column;gap:4px">
+              <div style="font-size:11px;color:var(--text3)">Check at least one package above</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="field-label" style="margin-bottom:6px">Sections to include</div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              ${Object.entries(DEMO_SECTIONS).map(([k, s]) => `
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer">
+                  <input type="checkbox" id="dae-sec-${k}" ${k === 'website' ? `onchange="toggleDaeWebsiteExample()"` : ''} /> ${s.label}
+                </label>`).join('')}
+            </div>
+            <div id="dae-website-example-row" style="display:none;margin-top:8px">
+              <div class="field-label" style="margin-bottom:4px">Client example to mention (website section)</div>
+              <input id="dae-website-example" placeholder="e.g. Forte Builders — went from buried to top 3 across multiple cities" style="${ta}" />
+            </div>
+          </div>
+        </div>`;
+      document.getElementById('modal-footer').innerHTML = `
+        <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
+        <button class="btn btn-primary btn-sm" onclick="generateDemoAsEmail('${companyId}')">Generate Email →</button>`;
+    } catch (e) {
+      document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
+      document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
+    }
+    return;
+  }
+  // ── END DEMO AS AN EMAIL ────────────────────────────────────────────────────
+
   const website = c.rawProps?.website || c.rawProps?.domain || '';
 
   try {
@@ -4568,7 +4768,70 @@ const EMAIL_TEMPLATES = [
     name: 'Partial Demo Follow-up',
     description: 'Demo got cut short — warm follow-up to finish the conversation',
   },
+  {
+    id: 'demo_as_email',
+    name: 'Demo as an Email',
+    description: 'Prospect won\'t get on a call — deliver the full demo pitch as an email',
+  },
 ];
+
+// ─── DEMO-AS-EMAIL: condensed reference content (high-level, not a full feature dump) ──
+const DEMO_SECTIONS = {
+  gbp: {
+    label: 'Google Business Profile',
+    reference: `WRONG: Profile isn't fully optimized — weak/missing primary category, inconsistent reviews, stale photos, incomplete services list, missing service areas, or wrong hours. Google can't confirm they're trustworthy enough to rank in the map pack.
+COSTING: The map pack (top 3 map results) gets ~80% of local calls. Every day out of it, calls go to competitors who simply look more "active and established" to Google — not necessarily better businesses, just better signaled ones.
+FIX: We fully manage GBP end-to-end across three parts — Offense (monitor competitors 24/7, alert on what to change to stay ahead), Defense (protect against suspensions/unauthorized edits, approve every change before it goes live), and Authority (automated post-job review requests + AI-assisted responses so reviews stay fresh and consistent, not sporadic).
+HELP: Consistent, protected map-pack visibility — where the majority of "ready to call today" searches get decided.`,
+  },
+  website: {
+    label: 'Website',
+    reference: `WRONG: No dedicated service+city pages, so Google can't confidently match the business to specific searches like "[service] in [city]" — it gets treated as a vague generalist. Often missing trust elements too (real project photos, reviews, clear call-to-action).
+COSTING: Falls back to generic matching or doesn't show up at all for the specific high-intent searches that convert; visitors who do land don't convert without visible trust signals.
+FIX: Build dedicated keyword-rich service pages and city/location pages, ongoing content (blogs/FAQs/galleries), clear trust signals and CTAs, plus retargeting so the business stays visible to visitors who don't call right away (7-30 days across the web, not just Google).
+HELP: Gives Google clear answers to "what do you do" and "where do you do it" — turning visibility into actual booked calls, not just traffic.`,
+  },
+  social: {
+    label: 'Social Media',
+    reference: `WRONG: Inconsistent or stale posting — homeowners (and Google) read an old last-post date as "maybe not in business anymore," even when the business is slammed with work.
+COSTING: Lost trust at the validation stage (homeowners often check social to confirm legitimacy before calling) and a weaker activity signal to Google's ranking systems.
+FIX: The Social Media Planner in the app — drop in a few job photos/videos, AI generates the caption/hashtags/CTA, publish immediately or schedule across Facebook/Instagram/GBP. Photo-to-Video turns raw job photos into a polished video automatically in about 10 seconds.
+HELP: Looks active and trusted without becoming a content-creation job — consistent activity without added effort, hands-on or fully hands-off.`,
+  },
+  citations: {
+    label: 'Visibility Infrastructure (Directories & Citations)',
+    reference: `WRONG: Inconsistent business info (name/address/phone) across the ~40 platforms Google cross-checks to verify a business — even small mismatches like "Suite" vs "Ste" make Google hesitate.
+COSTING: Google won't confidently recommend a business it can't verify clean data for, so jobs quietly go to competitors with cleaner listings — without the business ever knowing they were in the running.
+FIX: Clean and standardize business info across up to 40 platforms, remove duplicates, correct errors, and monitor 24/7 so unauthorized changes get caught and fixed immediately.
+HELP: One clear, consistent, verified version of the business everywhere — the trust foundation everything else builds on.`,
+  },
+  competitive: {
+    label: 'Competitive Intelligence & Heatmaps',
+    reference: `WRONG: No visibility into what competitors are doing or which specific neighborhoods/zip codes the business actually ranks in — most owners have no idea they rank well in one area but disappear a few miles away.
+COSTING: Every "red" (invisible) zone on the map represents real jobs going to competitors, and easy wins (like extending hours to catch after-5pm searches, or listing an unlisted service) go unnoticed.
+FIX: 24/7 competitor + listing monitoring with actionable alerts, a heatmap tool showing rank by neighborhood/service, and targeted SEO Boosts that build content for specific underperforming areas or services.
+HELP: Clear, prioritized targets to expand into instead of guessing — a concrete way to win back specific jobs and grow beyond the core city.`,
+  },
+  dashboard: {
+    label: 'Dashboard & Reporting',
+    reference: `WRONG: No real way to see if marketing is actually working — most agencies just send a monthly PDF and expect trust.
+COSTING: No visibility into ROI, so it's impossible to know what's working or make informed decisions about where to invest next.
+FIX: 24/7 live dashboard covering keyword rankings, GBP calls/views/engagement, website traffic and behavior, actual leads (calls/messages/form fills), and clear month-over-month change tracking.
+HELP: Confidence the investment is working, backed by real data instead of guesswork or waiting on someone else's update.`,
+  },
+};
+
+const DEMO_TIMELINE_REFERENCE = `Day 1-3: Dashboard access + kickoff call scheduled — we're already mapping services, areas, and opportunities before that call happens.
+Week 2-4 (Build Phase): Website foundation, directory network, Google Business Profile strategy, and content framework get built out. First working draft is typically ready around day 10-14.
+Around Day 30: Website live, Google profile optimized, review engine and tracking running — early signals (impressions, ranking movement, calls) are already visible on the dashboard since access starts day one.
+After ~90 Days (Scale Mode): Momentum compounds — most clients see traction within 30-60 days, but real acceleration typically shows up around months 4-6 as rankings, content, and reviews reinforce each other.`;
+
+const DEMO_PACKAGE_INFO = {
+  jumpstart: { name: 'Jumpstart', blurb: 'A software-automation tier for owners who want faster results without waiting on a fully managed buildout — more heatmap and photo-to-video tool access, monthly content suggestions (they do the writing), no managed website content or social posting.' },
+  growth: { name: 'Growth Essentials', blurb: 'The foundation — website, content, Google Business Profile, and citations fully managed for steady organic growth. No ad spend required. Rep uses the app to post their own social content.' },
+  strategic: { name: 'Strategic Advantage', blurb: 'Everything in Growth Essentials, plus done-for-you social posting, retargeting ads, and a dedicated account manager — takes the day-to-day workload off their plate entirely. Organic growth plus managed starter ads.' },
+  elite: { name: 'Elite Expansion', blurb: 'Everything in Strategic Advantage, scaled up — more content and service/city expansion, priority support, and Sponsored Google Maps placement for an immediate map-pack lift. Built for competitive or multi-location markets.' },
+};
 
 const DEFAULT_COLUMNS = [
   { name: 'name', label: 'Company' },
