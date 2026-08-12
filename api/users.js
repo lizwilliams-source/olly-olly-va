@@ -98,7 +98,7 @@ export default async function handler(req, res) {
 
     const keys = await kvKeys('user:*');
     const users = await Promise.all(keys.map(k => kvGet(k)));
-    return res.status(200).json(users.map(u => ({ email: u.email, name: u.name, isAdmin: u.isAdmin, ownerId: u.ownerId })));
+    return res.status(200).json(users.filter(Boolean).map(u => ({ email: u.email, name: u.name, isAdmin: u.isAdmin, ownerId: u.ownerId })));
   }
 
   // ── ADMIN: ADD USER ────────────────────────────────────────────────────────
