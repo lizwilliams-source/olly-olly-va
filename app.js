@@ -2391,6 +2391,7 @@ function showCallTypeSelector(companyId, source) {
           { key: 'general', icon: '📝', label: 'General Notes', desc: 'Summary, call notes, follow-up scheduling' },
           { key: 'sales', icon: '📊', label: 'Sales Notes', desc: 'Goals, pain points, current provider, primary services' },
           { key: 'demo', icon: '🎯', label: 'Set Call Notes', desc: 'Current marketing, pain points, objections, decision maker' },
+          { key: 'demo_call', icon: '🎬', label: 'Demo Notes', desc: 'Pain points confirmed, sections covered, objections, package pitched — from the actual demo' },
           { key: 'coaching', icon: '🏆', label: 'Coaching Notes', desc: 'Full scorecard across 12 areas' },
         ].map(t => `<div class="call-type-option" data-type="${t.key}" onclick="selectCallType('${t.key}')" style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg3);border:2px solid var(--border);border-radius:var(--radius);cursor:pointer">
           <div style="font-size:20px;flex-shrink:0">${t.icon}</div>
@@ -2445,7 +2446,7 @@ function selectCallType(type) {
   const uploadSec = document.getElementById('upload-section');
   if (uploadSec) uploadSec.style.display = 'block';
   const label = document.getElementById('selected-type-label');
-  if (label) label.textContent = { general:'📝 General Notes', sales:'📊 Sales Notes', demo:'🎯 Set Call Notes', coaching:'🏆 Coaching Notes' }[type] || '';
+  if (label) label.textContent = { general:'📝 General Notes', sales:'📊 Sales Notes', demo:'🎯 Set Call Notes', demo_call:'🎬 Demo Notes', coaching:'🏆 Coaching Notes' }[type] || '';
 }
 
 async function handleAudioUpload(companyId) {
@@ -2657,6 +2658,28 @@ function showCallAnalysis(companyId, transcript, analysis, priorNotes = [], isRe
           <a href="https://app.hubspot.com/contacts/45530742/deal/create?associatedObjectType=0-2&associatedObjectId=${companyId}" target="_blank" class="btn btn-sm" style="width:100%;justify-content:center;background:rgba(167,139,250,.1);border-color:rgba(167,139,250,.3);color:var(--purple);text-decoration:none;display:flex">💼 Create deal in HubSpot ↗</a>
           <div style="font-size:11px;color:var(--text3);margin-top:6px">Opens HubSpot with this company pre-linked</div>
         </div>
+      </div>`;
+  }
+
+  if (type === 'demo_call') {
+    const dc = analysis.demoCallNotes || {};
+    typeBlock = `
+      <div style="background:linear-gradient(135deg,rgba(245,166,35,.06),rgba(79,142,247,.06));border:1px solid rgba(245,166,35,.2);border-radius:var(--radius);padding:14px">
+        <div style="font-size:12px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">🎬 Demo Notes</div>
+        ${[
+          { id: 'dc-pain', label: 'Pain Points Confirmed During Demo', val: dc.painPointsConfirmed },
+          { id: 'dc-sections', label: 'Sections Covered & Reactions', val: dc.sectionsCovered },
+          { id: 'dc-objections', label: 'Objections Raised & How Handled', val: dc.objectionsRaised },
+          { id: 'dc-dm', label: 'Decision Maker Status', val: dc.decisionMakerStatus },
+          { id: 'dc-package', label: 'Package Pitched & Reaction', val: dc.packagePitched },
+          { id: 'dc-next', label: 'Next Steps', val: dc.nextSteps },
+        ].map(f => `
+          <div style="margin-bottom:10px">
+            <div class="field-label" style="margin-bottom:4px;color:var(--text2)">${f.label}</div>
+            <textarea id="${f.id}" style="width:100%;min-height:55px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:inherit;resize:vertical">${f.val || ''}</textarea>
+          </div>`).join('')}
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" onclick="saveDemoCallNotes('${companyId}')">💾 Save Demo Notes to HubSpot</button>
+        <div id="dc-save-msg" style="font-size:11px;color:var(--green);margin-top:6px;text-align:center"></div>
       </div>`;
   }
 
@@ -2918,6 +2941,29 @@ async function saveDemoNotes(companyId) {
       associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
     });
     const msg = document.getElementById('dn-save-msg');
+    if (msg) msg.textContent = '✓ Saved to HubSpot!';
+    toast('Demo notes saved to HubSpot ✓', 'success');
+  } catch { toast('Failed to save demo notes', 'error'); }
+}
+
+async function saveDemoCallNotes(companyId) {
+  const fields = [
+    ['Pain Points Confirmed During Demo', 'dc-pain'],
+    ['Sections Covered & Reactions', 'dc-sections'],
+    ['Objections Raised & How Handled', 'dc-objections'],
+    ['Decision Maker Status', 'dc-dm'],
+    ['Package Pitched & Reaction', 'dc-package'],
+    ['Next Steps', 'dc-next'],
+  ];
+  const body = `<h3>🎬 DEMO NOTES</h3>` + fields.map(([label, id]) =>
+    `<p><strong>${label}:</strong><br>${(document.getElementById(id)?.value || '—').replace(/\n/g, '<br>')}</p>`
+  ).join('');
+  try {
+    await hsPost('/crm/v3/objects/notes', {
+      properties: { hs_note_body: body, hs_timestamp: Date.now() },
+      associations: [{ to: { id: companyId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 190 }] }],
+    });
+    const msg = document.getElementById('dc-save-msg');
     if (msg) msg.textContent = '✓ Saved to HubSpot!';
     toast('Demo notes saved to HubSpot ✓', 'success');
   } catch { toast('Failed to save demo notes', 'error'); }

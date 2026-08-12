@@ -39,6 +39,16 @@ const demoFields = `
     "soleDecisionMaker": "Are they the sole decision maker? If not, who else is involved and what is their role?"
   }`;
 
+const demoCallFields = `
+  "demoCallNotes": {
+    "painPointsConfirmed": "Pain points confirmed or newly surfaced during the demo itself, in their own words where possible — not just what was expected going in.",
+    "sectionsCovered": "Which parts of the demo were actually shown (e.g. live SERP/GBP audit, website review, social media, visibility infrastructure/citations, competitive intelligence/heatmap, dashboard & reporting, timeline) and how the prospect reacted to each — interested, confused, pushed back, etc.",
+    "objectionsRaised": "Objections or hesitations raised during the demo, and how the rep handled them.",
+    "decisionMakerStatus": "Was the actual decision maker present for the demo? Any other stakeholders (spouse, partner, business partner) who still need to weigh in before a decision is made?",
+    "packagePitched": "Which package(s) were pitched, at what price, and the prospect's reaction to the recommendation.",
+    "nextSteps": "What was agreed to or the next step — e.g. proposal sent, follow-up call scheduled, they need to think it over, waiting on another decision maker."
+  }`;
+
 const coachingFields = `
   "coachingNotes": {
     "intro": { "score": 3, "notes": "Feedback on intro" },
@@ -60,6 +70,7 @@ const coachingFields = `
       general: '',
       sales: `,\n${salesFields}`,
       demo: `,\n${demoFields}`,
+      demo_call: `,\n${demoCallFields}`,
     }[callType] || '';
 
     // Speaker identification: infer from conversational content (introductions, turn-taking,
