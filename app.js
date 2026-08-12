@@ -4825,10 +4825,17 @@ const EMAIL_TEMPLATES = [
 const DEMO_SECTIONS = {
   gbp: {
     label: 'Google Business Profile',
-    reference: `WRONG: Profile isn't fully optimized — weak/missing primary category, inconsistent reviews, stale photos, incomplete services list, missing service areas, or wrong hours. Google can't confirm they're trustworthy enough to rank in the map pack.
+    reference: `WRONG: Profile isn't fully optimized — weak/missing primary category, stale photos, incomplete services list, missing service areas, or wrong hours. Google can't confirm they're trustworthy enough to rank in the map pack.
 COSTING: The map pack (top 3 map results) gets ~80% of local calls. Every day out of it, calls go to competitors who simply look more "active and established" to Google — not necessarily better businesses, just better signaled ones.
-FIX: We fully manage GBP end-to-end across three parts — Offense (monitor competitors 24/7, alert on what to change to stay ahead), Defense (protect against suspensions/unauthorized edits, approve every change before it goes live), and Authority (automated post-job review requests + AI-assisted responses so reviews stay fresh and consistent, not sporadic).
+FIX: We fully manage GBP end-to-end across two parts — Offense (monitor competitors 24/7, alert on what to change to stay ahead) and Defense (protect against suspensions/unauthorized edits, approve every change before it goes live).
 HELP: Consistent, protected map-pack visibility — where the majority of "ready to call today" searches get decided.`,
+  },
+  reviews: {
+    label: 'Reviews & Reputation',
+    reference: `WRONG: Reviews come in sporadically, or only when someone remembers to ask — no consistent system for requesting or responding to them.
+COSTING: Google doesn't just count reviews, it reads the pattern — recent, consistent, detailed reviews signal an active/trusted business. A business with fewer but consistent reviews can outrank one with more reviews that's gone quiet, so inconsistent review flow quietly costs both ranking and homeowner trust.
+FIX: After every job, the customer gets a simple, personalized text (based on the service and city) asking for a review, with natural automatic follow-up if they don't respond. AI helps them write a specific, detailed review instead of "Great job, 5 stars" — and helps the business respond professionally as reviews come in, so the profile stays active.
+HELP: A steady, hands-off stream of fresh, detailed reviews that tells Google (and homeowners) this business is trusted and active — not a one-time push.`,
   },
   website: {
     label: 'Website',
