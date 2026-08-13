@@ -2016,7 +2016,7 @@ async function openContact(id) {
     </div>
     <div class="field-row">
       <div><div class="field-label">Stage</div><div class="field-value">${c.masterStage || c.stage}</div></div>
-      <div><div class="field-label">AI Score</div><div class="field-value" style="color:var(--${c.urgency === 'urgent' ? 'red' : c.urgency === 'warm' ? 'amber' : 'blue'})">${c.score} / 100</div></div>
+      ${state.isAdmin ? `<div><div class="field-label">AI Score</div><div class="field-value" style="color:var(--${c.urgency === 'urgent' ? 'red' : c.urgency === 'warm' ? 'amber' : 'blue'})">${c.score} / 100</div></div>` : '<div></div>'}
     </div>
     <div class="field-row">
       <div><div class="field-label">Last Contact</div><div class="field-value">${c.lastContacted}</div></div>
@@ -4904,10 +4904,11 @@ const DEFAULT_COLUMNS = [
 ];
 
 function getUserColumns() {
-  if (state.userColumns) return state.userColumns;
-  try { const s = localStorage.getItem('oo_columns'); if (s) { state.userColumns = JSON.parse(s); return state.userColumns; } } catch {}
+  const filterScore = cols => state.isAdmin ? cols : cols.filter(c => c.name !== 'score');
+  if (state.userColumns) return filterScore(state.userColumns);
+  try { const s = localStorage.getItem('oo_columns'); if (s) { state.userColumns = JSON.parse(s); return filterScore(state.userColumns); } } catch {}
   state.userColumns = DEFAULT_COLUMNS;
-  return state.userColumns;
+  return filterScore(state.userColumns);
 }
 
 function getContactValue(c, colName) {
