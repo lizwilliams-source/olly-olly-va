@@ -4203,112 +4203,63 @@ async function openEmailCompose(companyId, useCallContext = false) {
   document.getElementById('modal').style.display = 'flex';
 }
 
-async function generateDemoEmail() {
-  const meta = state._demoEmailMeta;
-  if (!meta) return;
-  const { companyId, templateId, contactEmail, firstName, callDate } = meta;
+async function generateBasicInfoEmail(companyId) {
+  const meta = state._basicInfoEmailMeta || {};
   const c = state.contacts.find(x => x.id === companyId);
   const senderName = state.user?.name || '[Your Name]';
-  const isFullDemo = templateId === 'full_demo';
   const ta = 'width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none';
 
-  const attendees  = document.getElementById('demo-attendees')?.value.trim() || '';
-  const covered    = document.getElementById('demo-covered')?.value.trim() || '';
-  const pkg        = document.getElementById('demo-package')?.value.trim() || '';
-  const clientAsk  = document.getElementById('demo-client-ask')?.value.trim() || '';
-  const docSent    = document.getElementById('demo-doc-sent')?.value.trim() || '';
+  const notesList = state.notes?.[companyId] || [];
+  const selectedNotes = notesList.filter((n, i) => document.getElementById(`bi-note-${i}`)?.checked);
+  const notesContext = selectedNotes.map(n => `[${n.date}${n.type ? ' · ' + n.type : ''}]\n${n.text}`).join('\n---\n');
+  const followUp = document.getElementById('bi-followup')?.value.trim() || '';
 
   document.getElementById('modal-body').innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:20px;color:var(--text2);font-size:13px"><div style="width:16px;height:16px;border:2px solid var(--blue);border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;flex-shrink:0"></div>Writing email...</div>`;
-  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','basic_info')">← Back</button>`;
 
   try {
-    // Case studies — try org links first, then auto-discover from ollyolly.com
-    const orgLinks = state.orgSettings?.resourceLinks || [];
-    let csAccent   = orgLinks.find(l => /accent/i.test(l))    || '';
-    let csForte    = orgLinks.find(l => /forte/i.test(l))     || '';
-    let csGreenoak = orgLinks.find(l => /green|oak/i.test(l)) || '';
-
-    if (!csAccent || !csForte || !csGreenoak) {
-      try {
-        const ooRes = await fetch('/api/scrape?action=oo-resources', { headers: { Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        const urls = [...(ooRes.resourceUrls || []), ...(ooRes.allUrls || [])];
-        const find = (...kws) => urls.find(u => kws.some(kw => u.toLowerCase().includes(kw))) || '';
-        if (!csAccent)   csAccent   = find('accent', 'awning');
-        if (!csForte)    csForte    = find('forte', 'remodel');
-        if (!csGreenoak) csGreenoak = find('greenoak', 'green-oak', 'roofing');
-        // Generic fallback: find any case study / results page
-        const fallback = find('case-stud', 'result', 'client-stor', 'success');
-        if (!csAccent)   csAccent   = fallback || 'https://www.ollyolly.com';
-        if (!csForte)    csForte    = fallback || 'https://www.ollyolly.com';
-        if (!csGreenoak) csGreenoak = fallback || 'https://www.ollyolly.com';
-      } catch {
-        csAccent   = csAccent   || 'https://www.ollyolly.com';
-        csForte    = csForte    || 'https://www.ollyolly.com';
-        csGreenoak = csGreenoak || 'https://www.ollyolly.com';
-      }
-    }
-
-    const caseStudies = `Available Olly Olly case studies — if client asked for resources, include the most relevant one in the email body with its link. Write it naturally ("Here's one we did with a similar contractor: [link]"), not as a bullet list.
-- Accent Awnings (CA, awning installation): page 3 → #1 San Diego + #2 Orange County in ~90 days | ${csAccent}
-- Forte Builders (UT, remodeling/GC): couldn't rank for specific services → top 3 across multiple cities | ${csForte}
-- GreenOak Exteriors (VA, roofing): nearly invisible → top 3 across DC metro | ${csGreenoak}
-Include whichever fits the prospect's industry. Keep the link in the email body as-is (rep will fill in [paste X link] before sending if needed).`;
-
     const res = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-      system: `You write post-demo follow-up emails for Olly Olly sales reps. Match this style EXACTLY:
+      system: `You write "basic info" intro emails for Olly Olly sales reps — a simple who-we-are/what-we-do email, not a hard pitch. Match this style EXACTLY (warm and a little personal, never stiff or corporate-sounding):
 
-EXAMPLE (full demo, rep recommending Growth Essentials):
+EXAMPLE:
 ---
 Hey Don,
 
-Great talking with you, Judy, and Cameron this morning! Love that you guys are a family operation.
+Great chatting with you earlier! Wanted to send over a little bit about who we are and how we can help.
 
-You mentioned wanting to know more about who we are and how we work. Quick version: we've been doing this for home service contractors for a while now. We're not a big corporate thing — we actually work one-on-one with our clients and stick around to make sure the work we do turns into calls. No "set it and forget it" nonsense.
+Olly Olly's family owned and run — started by contractors, for contractors. Our CEO, Liz, kept watching her husband, a custom home builder, get let down by marketing company after marketing company, so she built the kind of partner she wished he'd had. That contractor-first mindset is still what drives everything we do today, for all 18,000+ clients we work with now.
 
-I recommend the Growth Essentials package at $600/month. You guys are solid at what you do, but your Google visibility is all over the place. One month you're getting calls, the next month it's crickets. That package gets you consistent, which means consistent lead flow. For that, we manage your website, your Google listings, and your reviews — which leads to more visibility on Google, and more calls.
+We handle it all — Google, Facebook, your website, directories, reviews — the whole digital picture, so you're not juggling five different vendors.
 
+Looking forward to chatting more on Thursday at 2!
+
+Thanks,
 Liz Williams
 National Account Executive
 Olly Olly
 ---
 
-RULES — non-negotiable:
-- SHORT: 3-4 paragraphs max, each 1-3 sentences
-- Start with "Hey [First Name]," not "Hi" or "Hello"
-- Second line: warm specific opener referencing who was on the call + one real observation
-- Address their specific ask directly, plainly
-- Package paragraph: name it, price it, give ONE reason it fits THEIR specific situation using their actual words, then what it does in plain English
+STRUCTURE (always in this order):
+1. Warm one-line opener referencing the earlier call.
+2. The company-story paragraph — keep it close to the example's wording and facts (family owned, contractor-first, CEO Liz's husband was a custom home builder burned by marketing companies, 18,000+ clients) but vary the phrasing naturally each time, don't copy it verbatim.
+3. The "we handle it all" paragraph — full digital picture (Google, Facebook, website, directories, reviews).
+4. ONLY if pain points are actually given below: one short paragraph naming their specific pain point(s) in plain language and how Olly Olly fixes it — skip this paragraph entirely if nothing concrete was provided, don't invent one.
+5. Closing line — if a follow-up date/time is given, reference it directly ("Looking forward to chatting more on [X]!"); if none is given, use a warm generic closer instead ("Looking forward to connecting soon!") — never invent a date.
+6. Sign off is JUST: [Name] / National Account Executive / Olly Olly — nothing else.
+
+RULES:
+- Warm and human — contractions are good, this should NOT read like it was written by AI
 - No corporate words: no "leverage", "synergy", "circle back", "moving forward", "touch base", "reach out"
 - No filler: no "I hope this finds you well", no "as per our conversation", no "please don't hesitate"
-- Sign off is JUST: [Name] / National Account Executive / Olly Olly — nothing else
-- NEVER say Olly Olly works with businesses in their area unless told
-- Use the actual call date — do NOT say "yesterday" unless that's literally the date`,
-      messages: [{ role: 'user', content: `Write a ${isFullDemo ? 'post-full-demo follow-up' : 'partial demo follow-up (they didn\'t finish the demo)'} email.
-
-Rep: ${senderName}
-Prospect first name: ${firstName || '[First Name]'}
+- Start with "Hey [First Name]," not "Hi" or "Hello"
+- Never leave a bracketed placeholder in the final email — if something isn't known, write around it instead`,
+      messages: [{ role: 'user', content: `Rep: ${senderName}
+Prospect first name: ${meta.firstName || '[First Name]'}
 Company: ${c?.name || ''}
-Call date: ${callDate || 'recent'}
+Follow-up date/time (if any): ${followUp || '(none scheduled)'}
 
-What the rep filled in:
-- Who was present: ${attendees || '(not provided)'}
-- What was covered in the demo: ${covered || '(not provided)'}
-- Package recommended + price: ${pkg || '(not provided)'}
-- What the client asked about or wanted: ${clientAsk || '(not provided)'}
-- Document sent: ${docSent || 'none'}
-
-${caseStudies}
-
-${isFullDemo
-  ? `This was a full demo. Write a follow-up that:
-1. Opens with the call date reference + names everyone who was there + one specific warm observation
-2. If they asked for info about OO, answer it casually (1-2 sentences — who OO is, how they work)
-3. Recommends the package with their specific situation as the reason + what it does in one sentence
-4. If they asked for a case study/resources, reference the most relevant one by name + result`
-  : `This demo got cut short. Write a follow-up that:
-1. Opens warmly referencing what you DID cover
-2. Teases the 2-3 most valuable things they didn't get to see (heat map, website analysis, pricing/setup fee waiver)
-3. Soft ask to finish — 20-30 min is all it takes`}
+Notes from the calls the rep selected — pull pain points from here if present, otherwise write generically with no pain-points paragraph:
+${notesContext || '(none selected — skip the pain-points paragraph)'}
 
 Return ONLY JSON: { "subject": "...", "body": "..." }. Body uses plain \\n, no markdown, no bullet points.` }],
       max_tokens: 600,
@@ -4317,22 +4268,22 @@ Return ONLY JSON: { "subject": "...", "body": "..." }. Body uses plain \\n, no m
     const text = data.content?.[0]?.text || '';
     let subject = '', body = '';
     try { const p = JSON.parse(text.replace(/```json|```/g,'').trim()); subject = p.subject || ''; body = p.body || text; }
-    catch { subject = isFullDemo ? `Great talking today, ${firstName || '[First Name]'}` : `Picking up where we left off, ${firstName || '[First Name]'}`; body = text; }
+    catch { subject = `A little about Olly Olly`; body = text; }
 
     state._emailImages = [];
     document.getElementById('modal-body').innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">
-      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" value="${contactEmail}" placeholder="recipient@example.com" style="${ta}" /></div>
+      <div><div class="field-label" style="margin-bottom:4px">To</div><input id="email-to" value="${meta.contactEmail || ''}" placeholder="recipient@example.com" style="${ta}" /></div>
       <div><div class="field-label" style="margin-bottom:4px">Subject</div><input id="email-subject" value="${subject.replace(/"/g,'&quot;')}" style="${ta}" /></div>
       <div><div class="field-label" style="margin-bottom:4px">Body</div><textarea id="email-body" style="${ta};min-height:300px;font-family:inherit;resize:vertical;line-height:1.6">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea></div>
     </div>`;
     document.getElementById('modal-footer').innerHTML = `
-      <button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>
+      <button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','basic_info')">← Back</button>
       <button class="btn btn-sm" onclick="copyEmailDraft()">📋 Copy</button>
       <button class="btn btn-sm" onclick="openMailto()">↗ Open in Gmail</button>
       <button class="btn btn-primary btn-sm" onclick="sendEmail('${companyId}')">Send</button>`;
   } catch (e) {
     document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
-    document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','${templateId}')">← Back</button>`;
+    document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="applyEmailTemplate('${companyId}','basic_info')">← Back</button>`;
   }
 }
 
@@ -4523,10 +4474,9 @@ async function applyEmailTemplate(companyId, templateId) {
 
   const notes = (state.notes?.[companyId] || []).slice(0, 5).map(n => n.text).join('\n---\n');
 
-  // ── DEMO FOLLOW-UP TEMPLATES ────────────────────────────────────────────────
-  if (templateId === 'full_demo' || templateId === 'partial_demo') {
+  // ── BASIC INFO EMAIL ────────────────────────────────────────────────────────
+  if (templateId === 'basic_info') {
     try {
-      // Always re-fetch notes fresh for demo templates — don't use stale cache
       try {
         const nr = await fetch(`/api/users?action=getnotes&companyId=${companyId}`, { headers: { Authorization: `Bearer ${state.token}` } });
         if (nr.ok) { const { notes: kv } = await nr.json(); if (!state.notes) state.notes = {}; state.notes[companyId] = kv || []; }
@@ -4538,120 +4488,36 @@ async function applyEmailTemplate(companyId, templateId) {
       const firstName = contactDetail?.properties?.firstname || '';
       const contactEmail = contactDetail?.properties?.email || '';
 
-      // Build notes context — prioritize transcripts over call body notes
-      const allNotes = (state.notes?.[companyId] || []).slice(0, 15);
-      const transcriptNotes = allNotes.filter(n => n.type === 'call_transcript' || n.type === 'call_analysis');
-      const otherNotes = allNotes.filter(n => n.type !== 'call_transcript' && n.type !== 'call_analysis');
-      const savedNotes = [
-        ...transcriptNotes.map(n => `[${n.date} · TRANSCRIPT]\n${n.text}`),
-        ...otherNotes.map(n => `[${n.date}${n.type ? ' · ' + n.type : ''}]\n${n.text}`),
-      ].join('\n---\n');
-
-      // If this is the company from the last analyzed call, use that transcript
-      const sessionTranscript = (state.lastCallCompanyId === companyId && state.lastCallContext)
-        ? `[Current session transcript]\n${state.lastCallContext}` : '';
-
-      // Get the most recent call date from HubSpot for accurate date reference
-      let mostRecentCallDate = state.lastCallDate || '';
-      let hsCallBody = '';
-      try {
-        const assocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/calls?limit=50`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        const callIds = (assocRes.results || []).map(r => r.id);
-        if (callIds.length) {
-          const batchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/calls/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: callIds.slice(0, 25).map(id => ({ id })), properties: ['hs_call_body', 'hs_timestamp'] }) }).then(r => r.json());
-          const sorted = (batchRes.results || []).sort((a, b) => (b.properties.hs_timestamp || 0) - (a.properties.hs_timestamp || 0));
-          if (sorted[0]?.properties.hs_timestamp && !mostRecentCallDate) {
-            mostRecentCallDate = new Date(+sorted[0].properties.hs_timestamp).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
-          }
-          const PLACEHOLDER = /call logged via olly olly/i;
-          hsCallBody = sorted
-            .filter(c => c.properties.hs_call_body && !PLACEHOLDER.test(c.properties.hs_call_body))
-            .slice(0, 3)
-            .map(c => `[HubSpot call note · ${new Date(+c.properties.hs_timestamp).toLocaleDateString()}]\n${c.properties.hs_call_body}`)
-            .join('\n---\n');
-        }
-      } catch {}
-
-      // Also fetch HubSpot engagement notes (where coaching notes + manual notes live)
-      let hsNoteBody = '';
-      try {
-        const noteAssocRes = await fetch('/api/hubspot', { headers: { 'X-HubSpot-Path': `/crm/v3/objects/companies/${companyId}/associations/notes?limit=20`, Authorization: `Bearer ${state.token}` } }).then(r => r.json());
-        const noteIds = (noteAssocRes.results || []).map(r => r.id);
-        if (noteIds.length) {
-          const noteBatchRes = await fetch('/api/hubspot', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-HubSpot-Path': '/crm/v3/objects/notes/batch/read', 'X-HubSpot-Method': 'POST', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ inputs: noteIds.slice(0, 10).map(id => ({ id })), properties: ['hs_note_body', 'hs_timestamp'] }) }).then(r => r.json());
-          hsNoteBody = (noteBatchRes.results || [])
-            .filter(n => n.properties.hs_note_body)
-            .sort((a, b) => (b.properties.hs_timestamp || 0) - (a.properties.hs_timestamp || 0))
-            .slice(0, 5)
-            .map(n => `[HubSpot note · ${new Date(+n.properties.hs_timestamp).toLocaleDateString()}]\n${n.properties.hs_note_body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}`)
-            .join('\n---\n');
-        }
-      } catch {}
-
-      const allNotesCtx = [sessionTranscript, savedNotes, hsNoteBody, hsCallBody].filter(Boolean).join('\n---\n');
-      const debugInfo = `KV notes: ${(state.notes?.[companyId] || []).length} | HubSpot notes: ${hsNoteBody ? hsNoteBody.split('---').length : 0} | Transcript: ${sessionTranscript ? 'yes' : 'no'}`;
-
-      // Extract demo details from call notes
-      let extracted = { attendees: '', covered: '', package: '', clientAsk: '' };
-      if (allNotesCtx) {
-        const extractRes = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({
-          system: `Extract specific details from sales call notes and coaching scorecards. Return only a JSON object, no explanation. Notes may be formatted as HTML coaching scorecards — extract info from the section labels and score notes. Be specific.`,
-          messages: [{ role: 'user', content: `Extract from these notes. Notes may include coaching scorecards with section labels (Intro, Setting the Demo, Website Situation, etc.) and freeform notes.\n\nNotes:\n${allNotesCtx.slice(0, 3000)}\n\nReturn JSON:\n- "attendees": who was on the call — look for names, owner, spouse, partner, family mentions\n- "covered": what was shown — look for mentions of SERP, GBP, website, pricing, heat map, social, reviews, citations\n- "package": package and price — look for Growth Essentials/Strategic Advantage/Elite Expansion + dollar amounts\n- "clientAsk": what they were interested in or asked about — look for questions, requests, pain points mentioned in notes` }],
-          max_tokens: 300,
-        })});
-        const extractData = await extractRes.json();
-        try { extracted = JSON.parse((extractData.content?.[0]?.text || '{}').replace(/```json|```/g,'').trim()); } catch {}
-      }
-
-      const toStr = v => Array.isArray(v) ? v.join(', ') : (v ? String(v) : '');
-      extracted.attendees  = toStr(extracted.attendees);
-      extracted.covered    = toStr(extracted.covered);
-      extracted.package    = toStr(extracted.package);
-      extracted.clientAsk  = toStr(extracted.clientAsk);
-      const hasExtracted = extracted.attendees || extracted.covered || extracted.package || extracted.clientAsk;
-      state._demoEmailMeta = { companyId, templateId, contactEmail, firstName, callDate: mostRecentCallDate };
-
-      // Show first 600 chars of notes so rep can fill in manually if extraction missed things
-      const notesPreview = allNotesCtx.slice(0, 600).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const notesList = state.notes?.[companyId] || [];
+      state._basicInfoEmailMeta = { companyId, contactEmail, firstName };
 
       document.getElementById('modal-body').innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:14px">
-          <div style="font-size:12px;color:var(--text3)">${hasExtracted ? 'Pulled from call — verify anything missing.' : 'Extraction came up blank — fill in from the notes below.'}</div>
-          ${allNotesCtx ? `<details style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 10px">
-            <summary style="font-size:11px;color:var(--text2);cursor:pointer;font-weight:600">📋 Notes found (${debugInfo})</summary>
-            <div style="font-size:11px;color:var(--text3);margin-top:8px;white-space:pre-wrap;line-height:1.5;max-height:140px;overflow-y:auto">${notesPreview}${allNotesCtx.length > 600 ? '…' : ''}</div>
-          </details>` : `<div style="font-size:11px;color:var(--amber);padding:6px 10px;background:var(--bg3);border-radius:6px">⚠️ No notes found (${debugInfo}) — fill in from memory.</div>`}
+        <div style="display:flex;flex-direction:column;gap:16px">
           <div>
-            <div class="field-label" style="margin-bottom:4px">Who was present?</div>
-            <input id="demo-attendees" value="${(extracted.attendees || '').replace(/"/g,'&quot;')}" placeholder="e.g. John (owner), wife Sarah" style="${ta}" />
+            <div class="field-label" style="margin-bottom:6px">Which calls do you want to include?</div>
+            ${notesList.length ? `<div style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px">
+              ${notesList.slice(0, 20).map((n, i) => `
+                <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--text2);cursor:pointer">
+                  <input type="checkbox" id="bi-note-${i}" style="margin-top:2px;flex-shrink:0" />
+                  <span><strong style="color:var(--text3)">[${n.date}${n.type ? ' · ' + n.type : ''}]</strong> ${(n.text || '').slice(0, 120).replace(/</g,'&lt;')}${(n.text || '').length > 120 ? '…' : ''}</span>
+                </label>`).join('')}
+            </div>` : `<div style="font-size:11px;color:var(--amber)">No saved notes/transcripts found for this company yet — the email will skip the pain-points section.</div>`}
           </div>
           <div>
-            <div class="field-label" style="margin-bottom:4px">What did you go over?</div>
-            <textarea id="demo-covered" placeholder="e.g. live SERP, GBP audit, website gaps, pricing" style="${ta};min-height:60px;font-family:inherit;resize:vertical">${(extracted.covered || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
-          </div>
-          <div>
-            <div class="field-label" style="margin-bottom:4px">Package + price?</div>
-            <input id="demo-package" value="${(extracted.package || '').replace(/"/g,'&quot;')}" placeholder="e.g. Growth Essentials at $600/mo" style="${ta}" />
-          </div>
-          <div>
-            <div class="field-label" style="margin-bottom:4px">What did they ask about or want?</div>
-            <textarea id="demo-client-ask" placeholder="e.g. wanted to know who else we work with, asked about reviews" style="${ta};min-height:60px;font-family:inherit;resize:vertical">${(extracted.clientAsk || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
-          </div>
-          <div>
-            <div class="field-label" style="margin-bottom:4px">Was a doc sent?</div>
-            <input id="demo-doc-sent" value="" placeholder="e.g. PandaDoc proposal (leave blank if none)" style="${ta}" />
+            <div class="field-label" style="margin-bottom:4px">Follow-up date/time (leave blank if none scheduled)</div>
+            <input id="bi-followup" placeholder="e.g. Thursday at 2pm" style="${ta}" />
           </div>
         </div>`;
       document.getElementById('modal-footer').innerHTML = `
         <button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>
-        <button class="btn btn-primary btn-sm" onclick="generateDemoEmail()">Generate Email →</button>`;
+        <button class="btn btn-primary btn-sm" onclick="generateBasicInfoEmail('${companyId}')">Generate Email →</button>`;
     } catch (e) {
       document.getElementById('modal-body').innerHTML = `<div style="color:var(--red);padding:20px;font-size:13px">Failed: ${e.message}</div>`;
       document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost btn-sm" onclick="openEmailCompose('${companyId}')">← Back</button>`;
     }
     return;
   }
-  // ── END DEMO FOLLOW-UP TEMPLATES ────────────────────────────────────────────
+  // ── END BASIC INFO EMAIL ────────────────────────────────────────────────────
 
   // ── DEMO AS AN EMAIL ────────────────────────────────────────────────────────
   if (templateId === 'demo_as_email') {
@@ -4866,14 +4732,9 @@ const EMAIL_TEMPLATES = [
     body: `Hi [First Name],\n\nHope you're doing well.\n\nMy name is [SENDER_NAME] and I work with Olly Olly. I recently connected with [Employee Name] on your team and wanted to reach out personally.\n\nWhile doing some research on your online presence, I noticed a few things that caught my attention and thought it made sense to introduce myself rather than make assumptions about what may or may not already be in the works.\n\nOne thing I noticed was [FINDING_1]\n\nI also came across [FINDING_2]\n\nI could be completely off base, which is why I'd love to get your perspective. In 15-20 minutes I can show you exactly what homeowners in your area are seeing when they search — and whether the calls are landing where they should be.\n\nDo you have some time this week or next?\n\nLooking forward to connecting.\n\nBest,\n[SENDER_NAME]\nNational Account Executive\nOlly Olly\n\nP.S. If there is someone else on the team who oversees your marketing efforts, feel free to point me in the right direction.`,
   },
   {
-    id: 'full_demo',
-    name: 'Full Demo Follow-up',
-    description: 'Ran the complete demo — reinforce value, drive the next step',
-  },
-  {
-    id: 'partial_demo',
-    name: 'Partial Demo Follow-up',
-    description: 'Demo got cut short — warm follow-up to finish the conversation',
+    id: 'basic_info',
+    name: 'Basic Info Email',
+    description: 'Who we are, what we do, and how we help — with an optional pain-points section',
   },
   {
     id: 'demo_as_email',
