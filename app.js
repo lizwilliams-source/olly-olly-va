@@ -106,6 +106,12 @@ function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'grid';
   document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
+  if (state.isAdmin) {
+    ['nav-hubspotviews', 'nav-myqueue', 'nav-nevercalled', 'nav-roerisklist', 'nav-followuplist', 'nav-dnrlist', 'nav-pipeline', 'nav-ai', 'dialer-nav'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'flex';
+    });
+  }
   document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => showView(item.dataset.view)); });
   document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal') && !state.transcribing) closeModal(); });
   init();
