@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VA Punch List</title>
+<style>
+  :root {
+    --bg: #F4F6F8;
+    --surface: #FFFFFF;
+    --surface-2: #EBEFF3;
+    --border: #D7DEE5;
+    --text: #16202B;
+    --text-dim: #5B6B7A;
+    --text-faint: #92A2B0;
+    --accent-debug: #B5650A;
+    --accent-debug-strong: #96540A;
+    --accent-debug-bg: #FBEBDA;
+    --accent-debug-bg-2: #F6DDC0;
+    --accent-build: #0E8C7F;
+    --accent-build-strong: #0B7267;
+    --accent-build-bg: #DFF3EF;
+    --accent-build-bg-2: #C7EBE4;
+    --shadow: 0 1px 2px rgba(22,32,43,0.04), 0 8px 24px -12px rgba(22,32,43,0.14);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F151B;
+      --surface: #161E27;
+      --surface-2: #1C2530;
+      --border: #2B3844;
+      --text: #E7EDF2;
+      --text-dim: #94A6B5;
+      --text-faint: #5D6E7C;
+      --accent-debug: #E39A3D;
+      --accent-debug-strong: #F0B15F;
+      --accent-debug-bg: rgba(227,154,61,0.13);
+      --accent-debug-bg-2: rgba(227,154,61,0.22);
+      --accent-build: #3FC3B3;
+      --accent-build-strong: #63D3C5;
+      --accent-build-bg: rgba(63,195,179,0.13);
+      --accent-build-bg-2: rgba(63,195,179,0.22);
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0F151B;
+    --surface: #161E27;
+    --surface-2: #1C2530;
+    --border: #2B3844;
+    --text: #E7EDF2;
+    --text-dim: #94A6B5;
+    --text-faint: #5D6E7C;
+    --accent-debug: #E39A3D;
+    --accent-debug-strong: #F0B15F;
+    --accent-debug-bg: rgba(227,154,61,0.13);
+    --accent-debug-bg-2: rgba(227,154,61,0.22);
+    --accent-build: #3FC3B3;
+    --accent-build-strong: #63D3C5;
+    --accent-build-bg: rgba(63,195,179,0.13);
+    --accent-build-bg-2: rgba(63,195,179,0.22);
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 40px 24px 80px;
+  }
+
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin-bottom: 40px;
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  h1 {
+    font-size: clamp(28px, 4vw, 38px);
+    line-height: 1.12;
+    margin: 0;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  .subhead {
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    max-width: 62ch;
+    margin: 0;
+  }
+
+  .statrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .stat {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 9px 14px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+
+  .stat .n {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  .stat .l {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .stat.debug .n { color: var(--accent-debug-strong); }
+  .stat.build .n { color: var(--accent-build-strong); }
+
+  /* ---------- Columns ---------- */
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px;
+    align-items: start;
+  }
+
+  @media (max-width: 760px) {
+    .columns { grid-template-columns: 1fr; }
+  }
+
+  .col {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .col-head {
+    padding: 20px 22px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .col-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .col-title {
+    font-size: 17px;
+    font-weight: 700;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .col.debug .dot { background: var(--accent-debug); }
+  .col.build .dot { background: var(--accent-build); }
+
+  .col-count {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .col-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.55;
+    margin: 8px 0 14px;
+  }
+
+  .progress-track {
+    height: 6px;
+    border-radius: 99px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 99px;
+    transition: width 0.25s ease;
+  }
+
+  .col.debug .progress-fill { background: var(--accent-debug); }
+  .col.build .progress-fill { background: var(--accent-build); }
+
+  /* ---------- Groups + items ---------- */
+  .group {
+    padding: 16px 22px 4px;
+  }
+
+  .group-label {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin: 0 0 10px;
+  }
+
+  ul.items {
+    list-style: none;
+    margin: 0 0 14px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 8px;
+    border-radius: 8px;
+    transition: background 0.12s ease;
+  }
+
+  .item:hover { background: var(--surface-2); }
+
+  .item input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 19px;
+    height: 19px;
+    flex-shrink: 0;
+    margin-top: 1px;
+    border-radius: 6px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    position: relative;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+
+  .item input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--accent-build);
+    outline-offset: 2px;
+  }
+
+  .col.debug .item input[type="checkbox"]:checked {
+    background: var(--accent-debug);
+    border-color: var(--accent-debug);
+  }
+
+  .col.build .item input[type="checkbox"]:checked {
+    background: var(--accent-build);
+    border-color: var(--accent-build);
+  }
+
+  .item input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 2px;
+    width: 5px;
+    height: 10px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(40deg);
+  }
+
+  .item-body { min-width: 0; cursor: pointer; }
+
+  .item-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.4;
+    transition: color 0.12s ease;
+  }
+
+  .item-note {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-top: 2px;
+  }
+
+  .item.checked .item-name {
+    color: var(--text-faint);
+    text-decoration: line-through;
+    text-decoration-color: var(--text-faint);
+  }
+
+  .item.checked .item-note {
+    color: var(--text-faint);
+  }
+
+  .col-foot {
+    padding: 4px 22px 20px;
+  }
+
+  .reset-btn {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 11px;
+    color: var(--text-faint);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .reset-btn:hover { color: var(--text-dim); }
+
+  footer {
+    max-width: 1080px;
+    margin: 34px auto 0;
+    font-size: 12.5px;
+    color: var(--text-faint);
+    line-height: 1.6;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">olly-olly-va &middot; internal</div>
+    <h1>VA Punch List</h1>
+    <p class="subhead">Everything hidden behind the admin toggle today (needs debugging before it goes back to reps), plus what's next to build. Check items off as you go — it's saved in this browser.</p>
+    <div class="statrow">
+      <div class="stat debug"><span class="n" id="debug-remaining">14</span><span class="l">left to debug</span></div>
+      <div class="stat build"><span class="n" id="build-remaining">4</span><span class="l">left to build</span></div>
+    </div>
+  </header>
+
+  <div class="columns">
+    <!-- DEBUG COLUMN -->
+    <section class="col debug" id="col-debug">
+      <div class="col-head">
+        <div class="col-title-row">
+          <h2 class="col-title"><span class="dot"></span>Needs debugging</h2>
+          <span class="col-count mono"><span id="debug-done">0</span>/<span id="debug-total">14</span></span>
+        </div>
+        <p class="col-desc">Hidden from non-admins via <code>employeeFeaturesVisible()</code> — visible again to everyone once you flip the Settings toggle, but worth checking each one still works correctly first.</p>
+        <div class="progress-track"><div class="progress-fill" id="debug-bar" style="width:0%"></div></div>
+      </div>
+
+      <div class="group">
+        <p class="group-label">Sidebar navigation (10)</p>
+        <ul class="items" data-section="debug">
+          <li class="item" data-id="d-dashboard">
+            <input type="checkbox" id="cb-d-dashboard" />
+            <label class="item-body" for="cb-d-dashboard">
+              <div class="item-name">Dashboard</div>
+              <div class="item-note">Also changed the non-admin landing page to My Companies since Dashboard used to load first — confirm that redirect still feels right.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-hsviews">
+            <input type="checkbox" id="cb-d-hsviews" />
+            <label class="item-body" for="cb-d-hsviews">
+              <div class="item-name">HS Views</div>
+              <div class="item-note">Browse companies by saved HubSpot view.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-myqueue">
+            <input type="checkbox" id="cb-d-myqueue" />
+            <label class="item-body" for="cb-d-myqueue">
+              <div class="item-name">My Queue</div>
+              <div class="item-note">Personal call queues.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-nevercalled">
+            <input type="checkbox" id="cb-d-nevercalled" />
+            <label class="item-body" for="cb-d-nevercalled">
+              <div class="item-name">Never Called</div>
+              <div class="item-note">Companies you've never called.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-roerisk">
+            <input type="checkbox" id="cb-d-roerisk" />
+            <label class="item-body" for="cb-d-roerisk">
+              <div class="item-name">ROE Risk</div>
+              <div class="item-note">Companies at risk of falling out of rotation.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-followups">
+            <input type="checkbox" id="cb-d-followups" />
+            <label class="item-body" for="cb-d-followups">
+              <div class="item-name">Follow-ups</div>
+              <div class="item-note">Companies with an open follow-up commitment.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-dnr">
+            <input type="checkbox" id="cb-d-dnr" />
+            <label class="item-body" for="cb-d-dnr">
+              <div class="item-name">Do Not Recirculate</div>
+              <div class="item-note">Stale DNR list.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-pipeline-nav">
+            <input type="checkbox" id="cb-d-pipeline-nav" />
+            <label class="item-body" for="cb-d-pipeline-nav">
+              <div class="item-name">Pipeline (nav page)</div>
+              <div class="item-note">Full pipeline board view.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-ai">
+            <input type="checkbox" id="cb-d-ai" />
+            <label class="item-body" for="cb-d-ai">
+              <div class="item-name">AI Assistant</div>
+              <div class="item-note">Standalone chat page.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-dialer">
+            <input type="checkbox" id="cb-d-dialer" />
+            <label class="item-body" for="cb-d-dialer">
+              <div class="item-name">Dialer</div>
+              <div class="item-note">Queue-driven calling view.</div>
+            </label>
+          </li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <p class="group-label">Company detail popup (4)</p>
+        <ul class="items" data-section="debug">
+          <li class="item" data-id="d-pipeline-btn">
+            <input type="checkbox" id="cb-d-pipeline-btn" />
+            <label class="item-body" for="cb-d-pipeline-btn">
+              <div class="item-name">Pipeline button</div>
+              <div class="item-note">"📌 Pipeline" / "📌 In Pipeline" toggle in the popup footer.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-queue-btn">
+            <input type="checkbox" id="cb-d-queue-btn" />
+            <label class="item-body" for="cb-d-queue-btn">
+              <div class="item-name">Queue button</div>
+              <div class="item-note">"+ Queue" add button / queue picker dropdown.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-aiscore">
+            <input type="checkbox" id="cb-d-aiscore" />
+            <label class="item-body" for="cb-d-aiscore">
+              <div class="item-name">AI Score</div>
+              <div class="item-note">Hidden both in the popup and as a column in the My Companies table.</div>
+            </label>
+          </li>
+          <li class="item" data-id="d-setdemo">
+            <input type="checkbox" id="cb-d-setdemo" />
+            <label class="item-body" for="cb-d-setdemo">
+              <div class="item-name">Set Demo button</div>
+              <div class="item-note">Opens the Set Demo Notes flow from the popup.</div>
+            </label>
+          </li>
+        </ul>
+      </div>
+
+      <div class="col-foot">
+        <button class="reset-btn" onclick="resetSection('debug')">reset section</button>
+      </div>
+    </section>
+
+    <!-- BUILD COLUMN -->
+    <section class="col build" id="col-build">
+      <div class="col-head">
+        <div class="col-title-row">
+          <h2 class="col-title"><span class="dot"></span>Next to build</h2>
+          <span class="col-count mono"><span id="build-done">0</span>/<span id="build-total">4</span></span>
+        </div>
+        <p class="col-desc">New work discussed but not started yet.</p>
+        <div class="progress-track"><div class="progress-fill" id="build-bar" style="width:0%"></div></div>
+      </div>
+
+      <div class="group">
+        <p class="group-label">Roadmap (4)</p>
+        <ul class="items" data-section="build">
+          <li class="item" data-id="b-contentlib">
+            <input type="checkbox" id="cb-b-contentlib" />
+            <label class="item-body" for="cb-b-contentlib">
+              <div class="item-name">Content library</div>
+              <div class="item-note">A real, editable library of reusable copy/snippets that Demo as an Email (and future templates) pulls from — right now the reference material is hardcoded in app.js.</div>
+            </label>
+          </li>
+          <li class="item" data-id="b-websiteex">
+            <input type="checkbox" id="cb-b-websiteex" />
+            <label class="item-body" for="cb-b-websiteex">
+              <div class="item-name">Website examples, baked in</div>
+              <div class="item-note">Pre-set client success stories (Forte Builders, GreenOak, etc.) selectable for the Website section of Demo as an Email, instead of typing one in by hand every time.</div>
+            </label>
+          </li>
+          <li class="item" data-id="b-coaching">
+            <input type="checkbox" id="cb-b-coaching" />
+            <label class="item-body" for="cb-b-coaching">
+              <div class="item-name">Coaching Notes template from Luke</div>
+              <div class="item-note">Swap in Luke's version of the scorecard in place of (or alongside) the current 12-area Coaching Notes. Waiting on the actual template content.</div>
+            </label>
+          </li>
+          <li class="item" data-id="b-allcompanies">
+            <input type="checkbox" id="cb-b-allcompanies" />
+            <label class="item-body" for="cb-b-allcompanies">
+              <div class="item-name">See all HubSpot companies at once</div>
+              <div class="item-note">An easier, unified way to browse every company in HubSpot in one place, instead of paging through My Companies or hopping between separate HS Views.</div>
+            </label>
+          </li>
+        </ul>
+      </div>
+
+      <div class="col-foot">
+        <button class="reset-btn" onclick="resetSection('build')">reset section</button>
+      </div>
+    </section>
+  </div>
+
+  <footer>Checkbox state lives only in this browser (localStorage) — it won't sync to another device or reset when the app itself changes.</footer>
+</div>
+
+<script>
+  const STORAGE_KEY = 'oo-punch-list-v1';
+
+  function loadState() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch { return {}; }
+  }
+
+  function saveState(state) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  }
+
+  let checkedState = loadState();
+
+  function updateSectionStats(section) {
+    const items = document.querySelectorAll(`.item[data-id^="${section === 'debug' ? 'd-' : 'b-'}"]`);
+    const total = items.length;
+    let done = 0;
+    items.forEach(el => { if (el.classList.contains('checked')) done++; });
+    document.getElementById(`${section}-done`).textContent = done;
+    document.getElementById(`${section}-total`).textContent = total;
+    document.getElementById(`${section}-remaining`).textContent = total - done;
+    document.getElementById(`${section}-bar`).style.width = total ? `${(done / total) * 100}%` : '0%';
+  }
+
+  function applyItemState(el, checked) {
+    const cb = el.querySelector('input[type="checkbox"]');
+    cb.checked = checked;
+    el.classList.toggle('checked', checked);
+  }
+
+  function toggleItem(el) {
+    const id = el.dataset.id;
+    const next = !el.classList.contains('checked');
+    applyItemState(el, next);
+    checkedState[id] = next;
+    saveState(checkedState);
+    const section = id.startsWith('d-') ? 'debug' : 'build';
+    updateSectionStats(section);
+  }
+
+  function resetSection(section) {
+    const prefix = section === 'debug' ? 'd-' : 'b-';
+    document.querySelectorAll(`.item[data-id^="${prefix}"]`).forEach(el => {
+      applyItemState(el, false);
+      delete checkedState[el.dataset.id];
+    });
+    saveState(checkedState);
+    updateSectionStats(section);
+  }
+
+  document.querySelectorAll('.item').forEach(el => {
+    const id = el.dataset.id;
+    applyItemState(el, !!checkedState[id]);
+    el.querySelector('input[type="checkbox"]').addEventListener('change', () => toggleItem(el));
+  });
+
+  updateSectionStats('debug');
+  updateSectionStats('build');
+</script>
+
+</body>
+</html>
