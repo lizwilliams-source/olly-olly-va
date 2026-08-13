@@ -107,7 +107,7 @@ function showApp() {
   document.getElementById('app-screen').style.display = 'grid';
   document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
   if (state.isAdmin) {
-    ['nav-hubspotviews', 'nav-myqueue', 'nav-nevercalled', 'nav-roerisklist', 'nav-followuplist', 'nav-dnrlist', 'nav-pipeline', 'nav-ai', 'dialer-nav'].forEach(id => {
+    ['nav-dashboard', 'nav-hubspotviews', 'nav-myqueue', 'nav-nevercalled', 'nav-roerisklist', 'nav-followuplist', 'nav-dnrlist', 'nav-pipeline', 'nav-ai', 'dialer-nav'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'flex';
     });
@@ -2097,10 +2097,10 @@ function toast(msg, type = '') {
 let refreshInterval = null;
 
 async function init() {
-  showView('dashboard');
+  showView(state.isAdmin ? 'dashboard' : 'contacts');
   await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels(), loadDemoTags(), loadOrgSettings()]);
   if (state.currentView === 'dashboard') showView('dashboard');
-  loadDailyBriefing();
+  if (state.isAdmin) loadDailyBriefing();
   startAutoRefresh();
 }
 
