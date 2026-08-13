@@ -2040,12 +2040,13 @@ async function openContact(id) {
     : state.queues.length <= 1
       ? `<button class="btn btn-sm" onclick="addToQueue('${id}',${state.queues[0] ? `'${state.queues[0].id}'` : 'null'});closeModal()">+ Queue</button>`
       : `<select onchange="if(this.value){addToQueue('${id}',this.value);closeModal()}" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer"><option value="">📋 Add to queue...</option>${state.queues.map(q=>`<option value="${q.id}">${q.name}</option>`).join('')}</select>`;
+  const pipelineBtn = `<button class="btn btn-sm ${inPipeline ? '' : ''}" style="${inPipeline ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="${inPipeline ? `removeFromPipeline('${id}')` : `addToPipeline('${id}')`}; closeModal()">
+      ${inPipeline ? '📌 In Pipeline' : '📌 Pipeline'}
+    </button>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
-    ${queueBtn}
-    <button class="btn btn-sm ${inPipeline ? '' : ''}" style="${inPipeline ? 'color:var(--purple);border-color:rgba(167,139,250,.4)' : ''}" onclick="${inPipeline ? `removeFromPipeline('${id}')` : `addToPipeline('${id}')`}; closeModal()">
-      ${inPipeline ? '📌 In Pipeline' : '📌 Pipeline'}
-    </button>
+    ${state.isAdmin ? queueBtn : ''}
+    ${state.isAdmin ? pipelineBtn : ''}
     <button class="btn btn-sm" onclick="openEmailCompose('${id}')">✉️ Send email</button>
     <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
     <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openSetDemoNotes('${id}')">🎯 Set Demo</button>
