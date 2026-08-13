@@ -2071,7 +2071,7 @@ async function openContact(id) {
     ${employeeFeaturesVisible() ? pipelineBtn : ''}
     <button class="btn btn-sm" onclick="openEmailCompose('${id}')">✉️ Send email</button>
     <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
-    <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openSetDemoNotes('${id}')">🎯 Set Demo</button>
+    ${employeeFeaturesVisible() ? `<button class="btn btn-sm" style="background:rgba(62,207,142,.1);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openSetDemoNotes('${id}')">🎯 Set Demo</button>` : ''}
 `;
   document.getElementById('modal').style.display = 'flex';
 }
