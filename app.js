@@ -102,16 +102,38 @@ async function saveOwnerFromUrl() {
   } catch (e) { errorEl.textContent = 'Something went wrong: ' + e.message; errorEl.style.display = 'block'; btn.textContent = 'Set up my account'; btn.disabled = false; }
 }
 
+function employeeFeaturesVisible() {
+  return state.isAdmin || !!state.orgSettings?.employeeFeaturesEnabled;
+}
+
+function applyFeatureVisibility() {
+  const show = employeeFeaturesVisible();
+  ['nav-dashboard', 'nav-hubspotviews', 'nav-myqueue', 'nav-nevercalled', 'nav-roerisklist', 'nav-followuplist', 'nav-dnrlist', 'nav-pipeline', 'nav-ai', 'dialer-nav'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = show ? 'flex' : 'none';
+  });
+}
+
+async function toggleEmployeeFeatures() {
+  state.orgSettings = state.orgSettings || {};
+  const next = !state.orgSettings.employeeFeaturesEnabled;
+  state.orgSettings.employeeFeaturesEnabled = next;
+  const pill = document.getElementById('toggle-employee-features-pill');
+  const knob = document.getElementById('toggle-employee-features-knob');
+  if (pill) pill.style.background = next ? 'var(--blue)' : 'var(--border2)';
+  if (knob) { knob.style.left = next ? '' : '2px'; knob.style.right = next ? '2px' : ''; }
+  applyFeatureVisibility();
+  try {
+    await fetch('/api/users?action=setorgsettings', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ employeeFeaturesEnabled: next }) });
+    toast(next ? 'Employee features enabled ✓' : 'Employee features hidden again ✓', 'success');
+  } catch { toast('Failed to save', 'error'); }
+}
+
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'grid';
   document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
-  if (state.isAdmin) {
-    ['nav-dashboard', 'nav-hubspotviews', 'nav-myqueue', 'nav-nevercalled', 'nav-roerisklist', 'nav-followuplist', 'nav-dnrlist', 'nav-pipeline', 'nav-ai', 'dialer-nav'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'flex';
-    });
-  }
+  applyFeatureVisibility();
   document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => showView(item.dataset.view)); });
   document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal') && !state.transcribing) closeModal(); });
   init();
@@ -2016,7 +2038,7 @@ async function openContact(id) {
     </div>
     <div class="field-row">
       <div><div class="field-label">Stage</div><div class="field-value">${c.masterStage || c.stage}</div></div>
-      ${state.isAdmin ? `<div><div class="field-label">AI Score</div><div class="field-value" style="color:var(--${c.urgency === 'urgent' ? 'red' : c.urgency === 'warm' ? 'amber' : 'blue'})">${c.score} / 100</div></div>` : '<div></div>'}
+      ${employeeFeaturesVisible() ? `<div><div class="field-label">AI Score</div><div class="field-value" style="color:var(--${c.urgency === 'urgent' ? 'red' : c.urgency === 'warm' ? 'amber' : 'blue'})">${c.score} / 100</div></div>` : '<div></div>'}
     </div>
     <div class="field-row">
       <div><div class="field-label">Last Contact</div><div class="field-value">${c.lastContacted}</div></div>
@@ -2045,8 +2067,8 @@ async function openContact(id) {
     </button>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
-    ${state.isAdmin ? queueBtn : ''}
-    ${state.isAdmin ? pipelineBtn : ''}
+    ${employeeFeaturesVisible() ? queueBtn : ''}
+    ${employeeFeaturesVisible() ? pipelineBtn : ''}
     <button class="btn btn-sm" onclick="openEmailCompose('${id}')">✉️ Send email</button>
     <button class="btn btn-sm" style="background:var(--green-dim);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openCallLogger('${id}')">🎙️ Log Call + AI Notes</button>
     <button class="btn btn-sm" style="background:rgba(62,207,142,.1);border-color:rgba(62,207,142,.3);color:var(--green)" onclick="closeModal();openSetDemoNotes('${id}')">🎯 Set Demo</button>
@@ -2099,8 +2121,9 @@ let refreshInterval = null;
 async function init() {
   showView(state.isAdmin ? 'dashboard' : 'contacts');
   await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels(), loadDemoTags(), loadOrgSettings()]);
+  applyFeatureVisibility(); // re-apply now that orgSettings (employeeFeaturesEnabled) has actually loaded
   if (state.currentView === 'dashboard') showView('dashboard');
-  if (state.isAdmin) loadDailyBriefing();
+  if (employeeFeaturesVisible()) loadDailyBriefing();
   startAutoRefresh();
 }
 
@@ -3314,6 +3337,20 @@ async function renderSettingsView() {
         </div>
 
         ${state.isAdmin ? `<div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">👁️ Employee Feature Visibility</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Dashboard, HS Views, My Queue, Never Called, ROE Risk, Follow-ups, Do Not Recirculate, Pipeline, AI Assistant, Dialer, and AI Score are currently admin-only. Flip this on to show them to everyone again.</div>
+          <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg3);border-radius:6px;cursor:pointer" onclick="toggleEmployeeFeatures()">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text)">Show these features to everyone</div>
+              <div style="font-size:12px;color:var(--text3);margin-top:2px">Off = admin-only. On = all reps see them too.</div>
+            </div>
+            <div style="width:36px;height:20px;border-radius:10px;background:${state.orgSettings?.employeeFeaturesEnabled ? 'var(--blue)' : 'var(--border2)'};position:relative;flex-shrink:0;transition:background .15s" id="toggle-employee-features-pill">
+              <div style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;${state.orgSettings?.employeeFeaturesEnabled ? 'right:2px' : 'left:2px'};transition:all .15s" id="toggle-employee-features-knob"></div>
+            </div>
+          </label>
+        </div>
+
+        <div>
           <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">🔌 HubSpot Private App Token</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:8px">Paste a HubSpot Private App token to unlock full API access (deals, etc). In HubSpot → Settings → Integrations → Private Apps → Create. Select all CRM scopes.</div>
           <input id="hs-private-token" type="password" placeholder="pat-na1-..." style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;margin-bottom:8px" />
@@ -4904,7 +4941,7 @@ const DEFAULT_COLUMNS = [
 ];
 
 function getUserColumns() {
-  const filterScore = cols => state.isAdmin ? cols : cols.filter(c => c.name !== 'score');
+  const filterScore = cols => employeeFeaturesVisible() ? cols : cols.filter(c => c.name !== 'score');
   if (state.userColumns) return filterScore(state.userColumns);
   try { const s = localStorage.getItem('oo_columns'); if (s) { state.userColumns = JSON.parse(s); return filterScore(state.userColumns); } } catch {}
   state.userColumns = DEFAULT_COLUMNS;
