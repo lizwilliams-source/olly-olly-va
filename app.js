@@ -102,8 +102,11 @@ async function saveOwnerFromUrl() {
   } catch (e) { errorEl.textContent = 'Something went wrong: ' + e.message; errorEl.style.display = 'block'; btn.textContent = 'Set up my account'; btn.disabled = false; }
 }
 
+// employeeFeaturesVisible() = "should the admin-only features render right now?"
+// True for admins, UNLESS that admin has personally flipped on Preview as Employee.
+// This never touches other users — it's local state + a localStorage flag, nothing server-side.
 function employeeFeaturesVisible() {
-  return state.isAdmin || !!state.orgSettings?.employeeFeaturesEnabled;
+  return state.isAdmin && !state.previewAsEmployee;
 }
 
 function applyFeatureVisibility() {
@@ -112,27 +115,42 @@ function applyFeatureVisibility() {
     const el = document.getElementById(id);
     if (el) el.style.display = show ? 'flex' : 'none';
   });
+  updatePreviewBanner();
 }
 
-async function toggleEmployeeFeatures() {
-  state.orgSettings = state.orgSettings || {};
-  const next = !state.orgSettings.employeeFeaturesEnabled;
-  state.orgSettings.employeeFeaturesEnabled = next;
-  const pill = document.getElementById('toggle-employee-features-pill');
-  const knob = document.getElementById('toggle-employee-features-knob');
-  if (pill) pill.style.background = next ? 'var(--blue)' : 'var(--border2)';
-  if (knob) { knob.style.left = next ? '' : '2px'; knob.style.right = next ? '2px' : ''; }
+function updatePreviewBanner() {
+  let banner = document.getElementById('preview-employee-banner');
+  if (state.isAdmin && state.previewAsEmployee) {
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'preview-employee-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:var(--amber);color:#1a1a1a;text-align:center;padding:8px 12px;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:12px';
+      document.body.appendChild(banner);
+    }
+    banner.innerHTML = `👁️ Previewing as a regular employee — only your screen is affected, no one else's view changed.
+      <button onclick="togglePreviewAsEmployee()" style="background:#1a1a1a;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-weight:600">Exit preview → back to admin</button>`;
+  } else if (banner) {
+    banner.remove();
+  }
+}
+
+const NON_ADMIN_HIDDEN_VIEWS = ['dashboard', 'hubspotviews', 'myqueue', 'nevercalled', 'roerisklist', 'followuplist', 'dnrlist', 'pipeline', 'ai', 'dialer'];
+
+function togglePreviewAsEmployee() {
+  if (!state.isAdmin) return;
+  state.previewAsEmployee = !state.previewAsEmployee;
+  try { localStorage.setItem('oo_preview_as_employee', state.previewAsEmployee ? '1' : '0'); } catch {}
   applyFeatureVisibility();
-  try {
-    await fetch('/api/users?action=setorgsettings', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` }, body: JSON.stringify({ employeeFeaturesEnabled: next }) });
-    toast(next ? 'Employee features enabled ✓' : 'Employee features hidden again ✓', 'success');
-  } catch { toast('Failed to save', 'error'); }
+  if (state.previewAsEmployee && NON_ADMIN_HIDDEN_VIEWS.includes(state.currentView)) showView('contacts');
+  if (state.currentView === 'settings') renderSettingsView();
+  toast(state.previewAsEmployee ? '👁️ Now previewing as a regular employee' : '✓ Back to your admin view', 'success');
 }
 
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'grid';
   document.getElementById('user-info').textContent = `👤 ${state.user?.name || state.user?.email}`;
+  try { state.previewAsEmployee = state.isAdmin && localStorage.getItem('oo_preview_as_employee') === '1'; } catch { state.previewAsEmployee = false; }
   applyFeatureVisibility();
   document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => showView(item.dataset.view)); });
   document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal') && !state.transcribing) closeModal(); });
@@ -2119,9 +2137,8 @@ function toast(msg, type = '') {
 let refreshInterval = null;
 
 async function init() {
-  showView(state.isAdmin ? 'dashboard' : 'contacts');
+  showView(employeeFeaturesVisible() ? 'dashboard' : 'contacts');
   await Promise.all([loadContacts(), loadQueue(), loadPipeline(), loadCalendarEvents(), loadCalendarPrefs(), loadPipelineLabels(), loadDemoTags(), loadOrgSettings()]);
-  applyFeatureVisibility(); // re-apply now that orgSettings (employeeFeaturesEnabled) has actually loaded
   if (state.currentView === 'dashboard') showView('dashboard');
   if (employeeFeaturesVisible()) loadDailyBriefing();
   startAutoRefresh();
@@ -3337,15 +3354,15 @@ async function renderSettingsView() {
         </div>
 
         ${state.isAdmin ? `<div>
-          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">👁️ Employee Feature Visibility</div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Dashboard, HS Views, My Queue, Never Called, ROE Risk, Follow-ups, Do Not Recirculate, Pipeline, AI Assistant, Dialer, and AI Score are currently admin-only. Flip this on to show them to everyone again.</div>
-          <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg3);border-radius:6px;cursor:pointer" onclick="toggleEmployeeFeatures()">
+          <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">👁️ Preview as Employee</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Dashboard, HS Views, My Queue, Never Called, ROE Risk, Follow-ups, Do Not Recirculate, Pipeline, AI Assistant, Dialer, AI Score, and the Pipeline/Queue/Set Demo buttons are hidden from regular reps. Flip this on to see your own screen exactly like they do — this only affects you, no one else's view changes.</div>
+          <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg3);border-radius:6px;cursor:pointer" onclick="togglePreviewAsEmployee()">
             <div>
-              <div style="font-size:13px;font-weight:600;color:var(--text)">Show these features to everyone</div>
-              <div style="font-size:12px;color:var(--text3);margin-top:2px">Off = admin-only. On = all reps see them too.</div>
+              <div style="font-size:13px;font-weight:600;color:var(--text)">Preview as a regular employee</div>
+              <div style="font-size:12px;color:var(--text3);margin-top:2px">Off = your normal admin view. On = see what a rep sees.</div>
             </div>
-            <div style="width:36px;height:20px;border-radius:10px;background:${state.orgSettings?.employeeFeaturesEnabled ? 'var(--blue)' : 'var(--border2)'};position:relative;flex-shrink:0;transition:background .15s" id="toggle-employee-features-pill">
-              <div style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;${state.orgSettings?.employeeFeaturesEnabled ? 'right:2px' : 'left:2px'};transition:all .15s" id="toggle-employee-features-knob"></div>
+            <div style="width:36px;height:20px;border-radius:10px;background:${state.previewAsEmployee ? 'var(--blue)' : 'var(--border2)'};position:relative;flex-shrink:0;transition:background .15s" id="toggle-preview-employee-pill">
+              <div style="width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;${state.previewAsEmployee ? 'right:2px' : 'left:2px'};transition:all .15s" id="toggle-preview-employee-knob"></div>
             </div>
           </label>
         </div>
